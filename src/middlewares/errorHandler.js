@@ -26,7 +26,7 @@ const DB_ERROR_CAUSES = {
 // HTTP error mapping
 const HTTP_ERROR_CAUSES = {
   400: 'BadRequest',
-  401: 'Unauthorized', 
+  401: 'Unauthorized',
   403: 'Forbidden',
   404: 'NotFound',
   405: 'MethodNotAllowed',
@@ -48,12 +48,12 @@ function determineErrorCause(error) {
   if (error.code && DB_ERROR_CAUSES[error.code]) {
     return DB_ERROR_CAUSES[error.code];
   }
-  
+
   // HTTP errors
   if (error.statusCode && HTTP_ERROR_CAUSES[error.statusCode]) {
     return HTTP_ERROR_CAUSES[error.statusCode];
   }
-  
+
   // Known error types
   if (error.name) {
     switch (error.name) {
@@ -67,7 +67,7 @@ function determineErrorCause(error) {
       default: return error.name;
     }
   }
-  
+
   // Network/Connection errors
   if (error.message) {
     if (error.message.includes('timeout')) return 'Timeout';
@@ -75,7 +75,7 @@ function determineErrorCause(error) {
     if (error.message.includes('network')) return 'NetworkError';
     if (error.message.includes('permission')) return 'PermissionDenied';
   }
-  
+
   return 'UnknownError';
 }
 
@@ -86,32 +86,32 @@ const errorHandler = (error, req, res, next) => {
   // Default to 500 server error
   let statusCode = error.statusCode || error.status || 500;
   let message = error.message || 'Internal Server Error';
-  
+
   // Determine the cause
   const cause = determineErrorCause(error);
-  
+
   // Handle specific error types
   switch (error.name) {
     case 'ValidationError':
       statusCode = 400;
       message = 'Validation failed';
       break;
-      
+
     case 'CastError':
       statusCode = 400;
       message = 'Invalid data format';
       break;
-      
+
     case 'JsonWebTokenError':
       statusCode = 401;
       message = 'Invalid authentication token';
       break;
-      
+
     case 'TokenExpiredError':
       statusCode = 401;
       message = 'Authentication token expired';
       break;
-      
+
     case 'SyntaxError':
       if (error.message.includes('JSON')) {
         statusCode = 400;
@@ -119,10 +119,10 @@ const errorHandler = (error, req, res, next) => {
       }
       break;
   }
-  
+
   // Set response status
   res.status(statusCode);
-  
+
   // Log the error with structured format
   if (statusCode >= 500) {
     // Server errors - log as ERROR
@@ -139,7 +139,7 @@ const errorHandler = (error, req, res, next) => {
       stack: process.env.NODE_ENV === 'development' ? error.stack : undefined
     });
   }
-  
+
   // Prepare error response
   const errorResponse = {
     success: false,
@@ -150,18 +150,27 @@ const errorHandler = (error, req, res, next) => {
       timestamp: new Date().toISOString()
     }
   };
-  
+
+  // Always include details if present (for validation errors, etc.)
+  if (error.details) {
+    errorResponse.error.details = error.details;
+  }
+
+  // Always include data if present (for contextual error info)
+  if (error.data) {
+    errorResponse.error.data = error.data;
+  }
+
   // Add stack trace in development
   if (process.env.NODE_ENV === 'development') {
     errorResponse.error.stack = error.stack;
-    errorResponse.error.details = error.details || null;
   }
-  
+
   // Add request ID if available
   if (req.requestId) {
     errorResponse.error.requestId = req.requestId;
   }
-  
+
   // Send error response
   res.json(errorResponse);
 };
@@ -173,7 +182,7 @@ const notFoundHandler = (req, res, next) => {
   const error = new Error(`Route not found: ${req.method} ${req.originalUrl}`);
   error.statusCode = 404;
   error.name = 'NotFoundError';
-  
+
   // Log 404 errors
   logger.warn('Route not found', {
     method: req.method,
@@ -184,7 +193,7 @@ const notFoundHandler = (req, res, next) => {
     ip: req.ip || req.connection.remoteAddress,
     userAgent: req.headers['user-agent']
   });
-  
+
   next(error);
 };
 

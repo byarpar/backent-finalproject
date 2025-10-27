@@ -7,6 +7,11 @@ const logAction = async (userId, action, tableName, recordId, oldValues = null, 
     const ipAddress = req ? (req.ip || req.connection?.remoteAddress || 'unknown') : null;
     const userAgent = req ? req.get('User-Agent') : null;
 
+    // Prepare metadata object combining old and new values
+    const metadata = {};
+    if (oldValues) metadata.oldValues = oldValues;
+    if (newValues) metadata.newValues = newValues;
+
     await db.query(`
       INSERT INTO audit_logs (user_id, action, table_name, record_id, old_values, new_values, ip_address, user_agent)
       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)

@@ -1,22 +1,29 @@
 const express = require('express');
 const cors = require('cors');
 const helmet = require('helmet');
-const rateLimit = require('express-rate-limit');
 const morgan = require('morgan');
 const path = require('path');
+const passport = require('passport');
+const session = require('express-session');
 
 const logger = require('./utils/logger');
 const { db } = require('./config/database');
 const { formatError } = require('./utils/helpers');
 const { errorHandler, notFoundHandler } = require('./middlewares/errorHandler');
 
+// Initialize passport configuration
+require('./config/passport');
+
 // Import routes
 const authRoutes = require('./routes/auth');
 const wordRoutes = require('./routes/words');
 const searchRoutes = require('./routes/search');
-const etymologyRoutes = require('./routes/etymology');
 const adminRoutes = require('./routes/admin');
 const discussionRoutes = require('./routes/discussions');
+const answerRoutes = require('./routes/answers');
+const tagsRoutes = require('./routes/tags');
+const userRoutes = require('./routes/users');
+const chatRoutes = require('./routes/chat');
 
 // Create Express application
 const app = express();
@@ -37,23 +44,25 @@ app.use(cors({
   allowedHeaders: ['Content-Type', 'Authorization']
 }));
 
-// Rate limiting
-const limiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 100, // limit each IP to 100 requests per windowMs
-  message: {
-    success: false,
-    error: {
-      message: 'Too many requests',
-      details: 'Please try again later'
-    }
-  }
-});
-app.use('/api/', limiter);
-
 // Body parsing middleware
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
+
+// Session middleware (required for passport)
+app.use(session({
+  secret: process.env.SESSION_SECRET || 'your-secret-key-change-in-production',
+  resave: false,
+  saveUninitialized: false,
+  cookie: {
+    secure: process.env.NODE_ENV === 'production', // true in production with HTTPS
+    httpOnly: true,
+    maxAge: 24 * 60 * 60 * 1000 // 24 hours
+  }
+}));
+
+// Initialize passport
+app.use(passport.initialize());
+app.use(passport.session());
 
 // Request logging middleware (structured format)
 app.use(logger.requestLogger);
@@ -85,9 +94,12 @@ app.get('/health', (req, res) => {
 app.use('/api/auth', authRoutes);
 app.use('/api/words', wordRoutes);
 app.use('/api/search', searchRoutes);
-app.use('/api/etymology', etymologyRoutes);
 app.use('/api/admin', adminRoutes);
 app.use('/api/discussions', discussionRoutes);
+app.use('/api/answers', answerRoutes);
+app.use('/api/tags', tagsRoutes);
+app.use('/api/users', userRoutes);
+app.use('/api/chat', chatRoutes);
 
 // Serve uploaded images statically
 app.use('/uploads', express.static(path.join(__dirname, '../uploads')));

@@ -1,6 +1,7 @@
 const { db } = require('../config/database');
 const logger = require('../utils/logger');
 const { safeParseInt } = require('../utils/helpers');
+const { ValidationError } = require('../utils/errors');
 
 /**
  * High-performance Search Service with Redis-like caching and query optimization
@@ -141,8 +142,17 @@ class SearchService {
     this.metrics.totalSearches++;
 
     try {
-      // Normalize input
+      // Validate and normalize input
+      if (!query || typeof query !== 'string') {
+        throw new ValidationError('Search query is required');
+      }
+
       const normalizedQuery = query.trim().replace(/\s+/g, ' ');
+
+      if (!normalizedQuery) {
+        throw new ValidationError('Search query cannot be empty');
+      }
+
       const detectedLang = language === 'auto' ? this.detectLanguage(normalizedQuery) : language;
 
       // Generate cache key
@@ -184,27 +194,32 @@ class SearchService {
   async executeSearch(query, language, page, limit) {
     const offset = (page - 1) * limit;
     const searchPattern = `%${query}%`;
+    const exactMatch = query;
+    const startsWithPattern = `${query}%`;
 
     // Build optimized query based on language
     let searchQuery, countQuery, params;
 
     if (language === 'english') {
+      // English-prioritized search
       searchQuery = `
         SELECT w.*, u.email as created_by_email,
-               CASE WHEN e.id IS NOT NULL THEN true ELSE false END as has_etymology,
-               GREATEST(
-                 similarity(w.english_word, $1),
-                 similarity(w.english_definition, $1),
-                 similarity(w.part_of_speech, $1)
-               ) as relevance_score
+               CASE WHEN w.etymology_origin IS NOT NULL OR w.etymology_context IS NOT NULL THEN true ELSE false END as has_etymology
         FROM words w
         LEFT JOIN users u ON w.created_by = u.id
-        LEFT JOIN etymology e ON w.id = e.word_id
-        WHERE w.english_word ILIKE $2 
-           OR w.english_definition ILIKE $2 
-           OR w.part_of_speech ILIKE $2
-        ORDER BY relevance_score DESC, w.created_at DESC
-        LIMIT $3 OFFSET $4
+        WHERE w.english_word ILIKE $1 
+           OR w.english_definition ILIKE $1 
+           OR w.part_of_speech ILIKE $1
+        ORDER BY 
+          CASE 
+            WHEN LOWER(w.english_word) = LOWER($2) THEN 1
+            WHEN w.english_word ILIKE $3 THEN 2
+            WHEN w.english_word ILIKE $1 THEN 3
+            WHEN w.english_definition ILIKE $3 THEN 4
+            ELSE 5
+          END,
+          w.created_at DESC
+        LIMIT $4 OFFSET $5
       `;
 
       countQuery = `
@@ -215,45 +230,64 @@ class SearchService {
            OR w.part_of_speech ILIKE $1
       `;
 
-      params = [query, searchPattern, limit, offset];
+      params = [searchPattern, exactMatch, startsWithPattern, limit, offset];
+
     } else if (language === 'lisu') {
+      // Lisu-prioritized search
       searchQuery = `
         SELECT w.*, u.email as created_by_email,
-               CASE WHEN e.id IS NOT NULL THEN true ELSE false END as has_etymology,
-               similarity(w.lisu_word, $1) as relevance_score
+               CASE WHEN w.etymology_origin IS NOT NULL OR w.etymology_context IS NOT NULL THEN true ELSE false END as has_etymology
         FROM words w
         LEFT JOIN users u ON w.created_by = u.id
-        LEFT JOIN etymology e ON w.id = e.word_id
-        WHERE w.lisu_word ILIKE $2
-        ORDER BY relevance_score DESC, w.created_at DESC
-        LIMIT $3 OFFSET $4
+        WHERE w.lisu_word ILIKE $1
+           OR w.lisu_definition ILIKE $1
+        ORDER BY 
+          CASE 
+            WHEN LOWER(w.lisu_word) = LOWER($2) THEN 1
+            WHEN w.lisu_word ILIKE $3 THEN 2
+            WHEN w.lisu_word ILIKE $1 THEN 3
+            ELSE 4
+          END,
+          w.created_at DESC
+        LIMIT $4 OFFSET $5
       `;
 
       countQuery = `
         SELECT COUNT(*) as total
         FROM words w
         WHERE w.lisu_word ILIKE $1
+           OR w.lisu_definition ILIKE $1
       `;
 
-      params = [query, searchPattern, limit, offset];
+      params = [searchPattern, exactMatch, startsWithPattern, limit, offset];
+
     } else {
-      // Mixed/auto search with full-text capabilities
+      // Mixed/english search - prioritize English for accessibility
       searchQuery = `
         SELECT w.*, u.email as created_by_email,
-               CASE WHEN e.id IS NOT NULL THEN true ELSE false END as has_etymology,
-               GREATEST(
-                 similarity(w.english_word, $1),
-                 similarity(w.lisu_word, $1),
-                 similarity(w.english_definition, $1)
-               ) as relevance_score
+               CASE WHEN w.etymology_origin IS NOT NULL OR w.etymology_context IS NOT NULL THEN true ELSE false END as has_etymology
         FROM words w
         LEFT JOIN users u ON w.created_by = u.id
-        LEFT JOIN etymology e ON w.id = e.word_id
-        WHERE w.english_word ILIKE $2 
-           OR w.lisu_word ILIKE $2 
-           OR w.english_definition ILIKE $2
-        ORDER BY relevance_score DESC, w.created_at DESC
-        LIMIT $3 OFFSET $4
+        WHERE w.english_word ILIKE $1 
+           OR w.lisu_word ILIKE $1 
+           OR w.english_definition ILIKE $1
+           OR w.lisu_definition ILIKE $1
+        ORDER BY 
+          CASE 
+            -- Prioritize English word matches first
+            WHEN LOWER(w.english_word) = LOWER($2) THEN 1
+            WHEN w.english_word ILIKE $3 THEN 2
+            WHEN w.english_word ILIKE $1 THEN 3
+            -- Then Lisu word matches
+            WHEN LOWER(w.lisu_word) = LOWER($2) THEN 4
+            WHEN w.lisu_word ILIKE $3 THEN 5
+            WHEN w.lisu_word ILIKE $1 THEN 6
+            -- Then definition matches
+            WHEN w.english_definition ILIKE $3 OR w.lisu_definition ILIKE $3 THEN 7
+            ELSE 8
+          END,
+          w.created_at DESC
+        LIMIT $4 OFFSET $5
       `;
 
       countQuery = `
@@ -262,9 +296,10 @@ class SearchService {
         WHERE w.english_word ILIKE $1 
            OR w.lisu_word ILIKE $1 
            OR w.english_definition ILIKE $1
+           OR w.lisu_definition ILIKE $1
       `;
 
-      params = [query, searchPattern, limit, offset];
+      params = [searchPattern, exactMatch, startsWithPattern, limit, offset];
     }
 
     // Execute queries in parallel for better performance
@@ -292,31 +327,42 @@ class SearchService {
    * Optimized suggestions with prefix matching
    */
   async getSuggestions(query, limit = 10) {
-    if (!query || query.length < 2) return { suggestions: [] };
+    if (!query || query.length < 1) return { suggestions: [] };
 
     const cacheKey = `suggest:${query}:${limit}`;
     const cached = this.getCachedResult(cacheKey);
     if (cached) return cached;
 
     const prefixPattern = `${query.trim()}%`;
+    const containsPattern = `%${query.trim()}%`;
 
     const result = await db.query(`
       (SELECT DISTINCT english_word as term, 'english' as type, 
-              length(english_word) as len
+              length(english_word) as len,
+              CASE 
+                WHEN english_word ILIKE $1 THEN 1
+                WHEN english_word ILIKE $2 THEN 2
+                ELSE 3
+              END as priority
        FROM words 
-       WHERE english_word ILIKE $1
-       ORDER BY len ASC, english_word ASC
-       LIMIT $2)
+       WHERE english_word ILIKE $2
+       ORDER BY priority ASC, len ASC, english_word ASC
+       LIMIT $3)
       UNION ALL
       (SELECT DISTINCT lisu_word as term, 'lisu' as type,
-              length(lisu_word) as len
+              length(lisu_word) as len,
+              CASE 
+                WHEN lisu_word ILIKE $1 THEN 1
+                WHEN lisu_word ILIKE $2 THEN 2
+                ELSE 3
+              END as priority
        FROM words 
-       WHERE lisu_word ILIKE $1
-       ORDER BY len ASC, lisu_word ASC
-       LIMIT $2)
-      ORDER BY len ASC, term ASC
-      LIMIT $2
-    `, [prefixPattern, Math.ceil(limit / 2)]);
+       WHERE lisu_word ILIKE $2
+       ORDER BY priority ASC, len ASC, lisu_word ASC
+       LIMIT $3)
+      ORDER BY priority ASC, len ASC, term ASC
+      LIMIT $3
+    `, [prefixPattern, containsPattern, Math.ceil(limit / 2)]);
 
     const suggestions = { suggestions: result.rows };
     this.setCachedResult(cacheKey, suggestions);

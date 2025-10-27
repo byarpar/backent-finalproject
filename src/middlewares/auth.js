@@ -115,7 +115,7 @@ const optionalAuth = async (req, res, next) => {
   const token = authHeader.substring(7);
   try {
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
-    
+
     // Get fresh user data with role information (same as authenticateToken)
     const userResult = await db.query(`
       SELECT u.id, u.email, u.role, u.is_active
@@ -176,9 +176,13 @@ const auditLog = (req, res, next) => {
 };
 
 module.exports = {
+  authenticate: authenticateToken,
   authenticateToken,
+  authorize: requireRole,
   requireRole,
+  requireMinRole: requireRole, // Alias for backward compatibility
   optionalAuth,
+  optionalAuthenticate: optionalAuth, // Alias for backward compatibility
   requireAdmin,
   auditLog
 };

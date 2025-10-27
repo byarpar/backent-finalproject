@@ -17,40 +17,40 @@ const structuredFormat = winston.format.combine(
   winston.format.printf(({ timestamp, level, message, method, url, statusCode, userId, cause, stack, ...meta }) => {
     // Base log format
     let logMessage = `${timestamp} ${level.toUpperCase()}`;
-    
+
     // Add status code if available
     if (statusCode) {
       logMessage += ` [${statusCode}]`;
     }
-    
+
     // Add HTTP method and URL if available
     if (method && url) {
       logMessage += ` ${method} ${url}`;
     }
-    
+
     // Add user ID if available
     if (userId) {
       logMessage += ` - user=${userId}`;
     }
-    
+
     // Add cause/error type if available
     if (cause) {
       logMessage += ` - cause=${cause}`;
     }
-    
+
     // Add the main message
     logMessage += ` - ${message}`;
-    
+
     // Add stack trace for errors
     if (stack) {
       logMessage += `\n${stack}`;
     }
-    
+
     // Add any additional metadata
     if (Object.keys(meta).length > 0) {
       logMessage += ` - meta=${JSON.stringify(meta)}`;
     }
-    
+
     return logMessage;
   })
 );
@@ -77,7 +77,7 @@ const logger = winston.createLogger({
       format: process.env.NODE_ENV === 'production' ? structuredFormat : consoleFormat,
       level: process.env.NODE_ENV === 'production' ? 'warn' : 'debug'
     }),
-    
+
     // File transport for all logs
     new winston.transports.File({
       filename: path.join(logsDir, 'app.log'),
@@ -85,7 +85,7 @@ const logger = winston.createLogger({
       maxsize: 5242880, // 5MB
       maxFiles: 10
     }),
-    
+
     // Separate file for errors only
     new winston.transports.File({
       filename: path.join(logsDir, 'error.log'),
@@ -94,7 +94,7 @@ const logger = winston.createLogger({
       maxsize: 5242880, // 5MB
       maxFiles: 10
     }),
-    
+
     // Daily rotating file for info logs
     new winston.transports.File({
       filename: path.join(logsDir, 'info.log'),
@@ -104,7 +104,7 @@ const logger = winston.createLogger({
       maxFiles: 10
     })
   ],
-  
+
   // Handle uncaught exceptions and rejections
   exceptionHandlers: [
     new winston.transports.File({
@@ -112,7 +112,7 @@ const logger = winston.createLogger({
       format: structuredFormat
     })
   ],
-  
+
   rejectionHandlers: [
     new winston.transports.File({
       filename: path.join(logsDir, 'rejections.log'),
@@ -131,14 +131,14 @@ const log = {
   warn: (message, meta = {}) => logger.warn(message, meta),
   info: (message, meta = {}) => logger.info(message, meta),
   debug: (message, meta = {}) => logger.debug(message, meta),
-  
+
   // Structured API error logging
   apiError: (req, res, error, cause = null) => {
     const statusCode = res.statusCode || 500;
     const userId = req.user ? req.user.id : req.headers['user-id'] || 'anonymous';
     const url = req.originalUrl || req.url;
     const method = req.method;
-    
+
     logger.error(error.message || 'API Error', {
       method,
       url,
@@ -152,7 +152,7 @@ const log = {
       params: req.params
     });
   },
-  
+
   // Database error logging
   dbError: (operation, error, context = {}) => {
     logger.error(`Database operation failed: ${operation}`, {
@@ -164,12 +164,12 @@ const log = {
       ...context
     });
   },
-  
+
   // Authentication error logging
   authError: (req, error, cause = 'AuthError') => {
     const userId = req.user ? req.user.id : 'unauthenticated';
     const ip = req.ip || req.connection.remoteAddress;
-    
+
     logger.error('Authentication failed', {
       method: req.method,
       url: req.originalUrl || req.url,
@@ -181,11 +181,11 @@ const log = {
       stack: error.stack
     });
   },
-  
+
   // Validation error logging
   validationError: (req, errors, field = null) => {
     const userId = req.user ? req.user.id : 'anonymous';
-    
+
     logger.warn('Validation failed', {
       method: req.method,
       url: req.originalUrl || req.url,
@@ -197,12 +197,12 @@ const log = {
       body: req.body
     });
   },
-  
+
   // Request logging middleware
   requestLogger: (req, res, next) => {
     const start = Date.now();
     const userId = req.user ? req.user.id : 'anonymous';
-    
+
     // Log the request
     logger.info('Request received', {
       method: req.method,
@@ -211,12 +211,12 @@ const log = {
       ip: req.ip || req.connection.remoteAddress,
       userAgent: req.headers['user-agent']
     });
-    
+
     // Log the response when it finishes
     res.on('finish', () => {
       const duration = Date.now() - start;
       const statusCode = res.statusCode;
-      
+
       if (statusCode >= 400) {
         logger.warn('Request completed with error', {
           method: req.method,
@@ -236,10 +236,10 @@ const log = {
         });
       }
     });
-    
+
     next();
   },
-  
+
   // Performance logging
   performance: (operation, duration, context = {}) => {
     const level = duration > 1000 ? 'warn' : 'info';
@@ -250,12 +250,12 @@ const log = {
       ...context
     });
   },
-  
+
   // Security event logging
   security: (event, req, details = {}) => {
     const userId = req.user ? req.user.id : 'anonymous';
     const ip = req.ip || req.connection.remoteAddress;
-    
+
     logger.warn(`Security event: ${event}`, {
       event,
       userId,
@@ -264,6 +264,16 @@ const log = {
       url: req.originalUrl || req.url,
       cause: 'SecurityEvent',
       ...details
+    });
+  },
+
+  // Audit logging for admin actions
+  audit: (userId, action, context = {}) => {
+    logger.info(`Audit: ${action}`, {
+      userId,
+      action,
+      category: 'audit',
+      ...context
     });
   }
 };

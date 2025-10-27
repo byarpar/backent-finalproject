@@ -1,393 +1,224 @@
-const bcrypt = require('bcryptjs');
-const jwt = require('jsonwebtoken');
-const User = require('../models/User');
+/**
+ * Authentication Controller
+ * Professional controller using service layer and proper error handling
+ */
+
+const authService = require('../services/authService');
+const userService = require('../services/userService');
+const { sendSuccess, sendCreated, sendError } = require('../utils/response');
+const { asyncHandler } = require('../utils/helpers');
+const { HTTP_STATUS } = require('../config/constants');
 const logger = require('../utils/logger');
-const { formatResponse, formatError } = require('../utils/helpers');
 
 class AuthController {
-  // Register new user
-  static async register(req, res) {
-    try {
-      const { email, password, username, full_name, role = 'user' } = req.body;
+  /**
+   * Register new user
+   * POST /api/auth/register
+   */
+  register = asyncHandler(async (req, res) => {
+    const { email, password, username, full_name, role } = req.body;
 
-      // Check if user already exists
-      const existingUser = await User.findByEmail(email);
-      if (existingUser) {
-        return res.status(409).json(formatError(
-          'User already exists',
-          'An account with this email already exists'
-        ));
-      }
+    const result = await authService.register({
+      email,
+      password,
+      username,
+      full_name,
+      role
+    });
 
-      // Check if username already exists (if provided)
-      if (username) {
-        const existingUsername = await User.findByUsername(username);
-        if (existingUsername) {
-          return res.status(409).json(formatError(
-            'Username already exists',
-            'This username is already taken'
-          ));
-        }
-      }
+    sendCreated(res, result, 'Registration successful');
+  });
 
-      // Hash password
-      const hashedPassword = await bcrypt.hash(password, 12);
+  /**
+   * Login user
+   * POST /api/auth/login
+   */
+  login = asyncHandler(async (req, res) => {
+    const { email, password } = req.body;
 
-      // Create user
-      const user = await User.create({
-        email,
-        password: hashedPassword,
-        username,
-        full_name,
-        role
-      });
+    const result = await authService.login(email, password);
 
-      // Generate JWT token
-      const token = jwt.sign(
-        { 
-          userId: user.id, 
-          email: user.email, 
-          username: user.username,
-          full_name: user.full_name,
-          role: user.role 
-        },
-        process.env.JWT_SECRET,
-        { expiresIn: process.env.JWT_EXPIRES_IN || '7d' }
-      );
+    sendSuccess(res, HTTP_STATUS.OK, result, 'Login successful');
+  });
 
-      logger.info('User registered successfully', {
-        userId: user.id,
-        email: user.email,
-        role: user.role
-      });
+  /**
+   * Google OAuth callback
+   * GET /api/auth/google/callback
+   */
+  googleCallback = asyncHandler(async (req, res) => {
+    // req.user is already populated by passport strategy with the User model
+    const user = req.user;
 
-      res.status(201).json(formatResponse(true, {
-        token,
-        user: {
-          id: user.id,
-          email: user.email,
-          username: user.username,
-          full_name: user.full_name,
-          role: user.role,
-          created_at: user.created_at
-        }
-      }, 'Registration successful'));
-
-    } catch (error) {
-      logger.error('Registration failed:', { error: error.message });
-      res.status(500).json(formatError('Registration failed', error.message));
+    if (!user) {
+      logger.warn('Google OAuth callback - no user found');
+      const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
+      return res.redirect(`${frontendUrl}/auth/callback?error=no_user`);
     }
-  }
 
-  // Login user
-  static async login(req, res) {
-    try {
-      const { email, password } = req.body;
+    logger.info('Google OAuth successful', { userId: user.id, email: user.email });
 
-      // Find user by email
-      const user = await User.findByEmail(email);
-      if (!user) {
-        return res.status(401).json(formatError(
-          'Invalid credentials',
-          'Email or password is incorrect'
-        ));
-      }
+    // Generate tokens for the authenticated user
+    const token = authService.generateAccessToken(user);
+    const refreshToken = authService.generateRefreshToken(user);
 
-      // Check if user is active
-      if (!user.is_active) {
-        return res.status(401).json(formatError(
-          'Account deactivated',
-          'Your account has been deactivated'
-        ));
-      }
+    // Redirect to frontend with tokens
+    const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
+    res.redirect(`${frontendUrl}/auth/callback?token=${token}&refreshToken=${refreshToken}`);
+  });
 
-      // Check password
-      const isPasswordValid = await bcrypt.compare(password, user.password);
-      if (!isPasswordValid) {
-        return res.status(401).json(formatError(
-          'Invalid credentials',
-          'Email or password is incorrect'
-        ));
-      }
+  /**
+   * Verify JWT token
+   * GET /api/auth/verify
+   */
+  verifyToken = asyncHandler(async (req, res) => {
+    const token = req.headers.authorization?.replace('Bearer ', '');
 
-      // Generate JWT token
-      const token = jwt.sign(
-        { 
-          userId: user.id, 
-          email: user.email, 
-          username: user.username,
-          full_name: user.full_name,
-          role: user.role 
-        },
-        process.env.JWT_SECRET,
-        { expiresIn: process.env.JWT_EXPIRES_IN || '7d' }
-      );
-
-      // Update last_login timestamp
-      await User.update(user.id, { last_login: new Date() });
-
-      logger.info('User logged in successfully', {
-        userId: user.id,
-        email: user.email,
-        ip: req.ip
-      });
-
-      res.json(formatResponse(true, {
-        token,
-        user: {
-          id: user.id,
-          email: user.email,
-          username: user.username,
-          full_name: user.full_name,
-          role: user.role
-        }
-      }, 'Login successful'));
-
-    } catch (error) {
-      logger.error('Login failed:', { error: error.message });
-      res.status(500).json(formatError('Login failed', error.message));
+    if (!token) {
+      return sendError(res, { message: 'No token provided' }, HTTP_STATUS.UNAUTHORIZED);
     }
-  }
 
-  // Verify token
-  static async verifyToken(req, res) {
-    try {
-      const user = await User.findById(req.user.id);
-      if (!user) {
-        return res.status(404).json(formatError('User not found'));
-      }
+    const user = await authService.verifyToken(token);
 
-      res.json(formatResponse(true, {
-        user: {
-          id: user.id,
-          email: user.email,
-          username: user.username,
-          full_name: user.full_name,
-          role: user.role,
-          is_active: user.is_active
-        }
-      }, 'Token verified'));
+    sendSuccess(res, HTTP_STATUS.OK, { user, valid: true }, 'Token is valid');
+  });
 
-    } catch (error) {
-      logger.error('Token verification failed:', { error: error.message });
-      res.status(500).json(formatError('Token verification failed', error.message));
+  /**
+   * Refresh access token
+   * POST /api/auth/refresh
+   */
+  refreshToken = asyncHandler(async (req, res) => {
+    const { refreshToken } = req.body;
+
+    if (!refreshToken) {
+      return sendError(res, { message: 'Refresh token required' }, HTTP_STATUS.BAD_REQUEST);
     }
-  }
 
-  // Get user profile
-  static async getProfile(req, res) {
-    try {
-      const user = await User.findById(req.user.id);
-      if (!user) {
-        return res.status(404).json(formatError('User not found'));
-      }
+    const result = await authService.refreshToken(refreshToken);
 
-      res.json(formatResponse(true, {
-        user: {
-          id: user.id,
-          email: user.email,
-          username: user.username,
-          full_name: user.full_name,
-          bio: user.bio,
-          location: user.location,
-          native_language: user.native_language,
-          role: user.role,
-          is_active: user.is_active,
-          last_login: user.last_login,
-          profile_photo_url: user.profile_photo_url,
-          dark_mode_preference: user.dark_mode_preference,
-          created_at: user.created_at,
-          updated_at: user.updated_at
-        }
-      }));
+    sendSuccess(res, HTTP_STATUS.OK, result, 'Token refreshed successfully');
+  });
 
-    } catch (error) {
-      logger.error('Get profile failed:', { error: error.message });
-      res.status(500).json(formatError('Failed to get profile', error.message));
-    }
-  }
+  /**
+   * Request password reset
+   * POST /api/auth/forgot-password
+   */
+  forgotPassword = asyncHandler(async (req, res) => {
+    const { email } = req.body;
 
-  // Update profile
-  static async updateProfile(req, res) {
-    try {
-      const { email, username, full_name, bio, location, native_language, profile_photo_url, dark_mode_preference } = req.body;
-      const userId = req.user.id;
+    await authService.forgotPassword(email);
 
-      // Check if email is being changed and already exists
-      if (email && email !== req.user.email) {
-        const existingUser = await User.findByEmail(email);
-        if (existingUser && existingUser.id !== userId) {
-          return res.status(409).json(formatError(
-            'Email already exists',
-            'Another user is already using this email'
-          ));
-        }
-      }
+    sendSuccess(res, HTTP_STATUS.OK, null, 'Password reset email sent if account exists');
+  });
 
-      // Check if username is being changed and already exists
-      if (username && username !== req.user.username) {
-        const existingUsername = await User.findByUsername(username);
-        if (existingUsername && existingUsername.id !== userId) {
-          return res.status(409).json(formatError(
-            'Username already exists',
-            'This username is already taken'
-          ));
-        }
-      }
+  /**
+   * Reset password with token
+   * POST /api/auth/reset-password
+   */
+  resetPassword = asyncHandler(async (req, res) => {
+    const { token, newPassword } = req.body;
 
-      // Prepare update data - only include fields that are provided
-      const updateData = {};
-      if (email !== undefined) updateData.email = email;
-      if (username !== undefined) updateData.username = username;
-      if (full_name !== undefined) updateData.full_name = full_name;
-      if (bio !== undefined) updateData.bio = bio;
-      if (location !== undefined) updateData.location = location;
-      if (native_language !== undefined) updateData.native_language = native_language;
-      if (profile_photo_url !== undefined) updateData.profile_photo_url = profile_photo_url;
-      if (dark_mode_preference !== undefined) updateData.dark_mode_preference = dark_mode_preference;
+    await authService.resetPassword(token, newPassword);
 
-      const updatedUser = await User.update(userId, updateData);
-      if (!updatedUser) {
-        return res.status(404).json(formatError('User not found'));
-      }
+    sendSuccess(res, HTTP_STATUS.OK, null, 'Password reset successful');
+  });
 
-      logger.info('Profile updated successfully', {
-        userId: updatedUser.id,
-        email: updatedUser.email,
-        fieldsUpdated: Object.keys(updateData)
-      });
+  /**
+   * Change password (authenticated)
+   * POST /api/auth/change-password
+   */
+  changePassword = asyncHandler(async (req, res) => {
+    const { currentPassword, newPassword } = req.body;
+    const userId = req.user.id;
 
-      res.json(formatResponse(true, {
-        user: {
-          id: updatedUser.id,
-          email: updatedUser.email,
-          username: updatedUser.username,
-          full_name: updatedUser.full_name,
-          bio: updatedUser.bio,
-          location: updatedUser.location,
-          native_language: updatedUser.native_language,
-          role: updatedUser.role,
-          is_active: updatedUser.is_active,
-          last_login: updatedUser.last_login,
-          profile_photo_url: updatedUser.profile_photo_url,
-          updated_at: updatedUser.updated_at
-        }
-      }, 'Profile updated successfully'));
+    await authService.changePassword(userId, currentPassword, newPassword);
 
-    } catch (error) {
-      logger.error('Update profile failed:', { error: error.message });
-      res.status(500).json(formatError('Failed to update profile', error.message));
-    }
-  }
+    sendSuccess(res, HTTP_STATUS.OK, null, 'Password changed successfully');
+  });
 
-  // Change password
-  static async changePassword(req, res) {
-    try {
-      const {
-        currentPassword,
-        newPassword,
-        current_password,
-        new_password
-      } = req.body;
+  /**
+   * Send verification email
+   * POST /api/auth/send-verification
+   */
+  sendVerificationEmail = asyncHandler(async (req, res) => {
+    const { email } = req.body;
 
-      // Support both naming conventions
-      const currentPass = currentPassword || current_password;
-      const newPass = newPassword || new_password;
+    await authService.sendVerificationEmail(email);
 
-      logger.info('Change password request:', {
-        userId: req.user.id,
-        email: req.user.email,
-        hasCurrentPass: !!currentPass,
-        hasNewPass: !!newPass,
-        body: Object.keys(req.body)
-      });
+    sendSuccess(res, HTTP_STATUS.OK, null, 'Verification email sent');
+  });
 
-      if (!currentPass || !newPass) {
-        return res.status(400).json(formatError(
-          'Missing required fields',
-          'Both current password and new password are required'
-        ));
-      }
+  /**
+   * Verify email with code
+   * POST /api/auth/verify-email
+   */
+  verifyEmail = asyncHandler(async (req, res) => {
+    const { email, code } = req.body;
 
-      const userId = req.user.id;
+    const user = await authService.verifyEmail(email, code);
 
-      // Get user with password
-      logger.info('Looking up user by email:', req.user.email);
-      const user = await User.findByEmail(req.user.email);
+    sendSuccess(res, HTTP_STATUS.OK, { user }, 'Email verified successfully');
+  });
 
-      logger.info('User lookup result:', {
-        found: !!user,
-        hasPassword: !!(user && user.password),
-        userKeys: user ? Object.keys(user) : []
-      });
+  /**
+   * Resend verification code
+   * POST /api/auth/resend-verification
+   */
+  resendVerification = asyncHandler(async (req, res) => {
+    const { email } = req.body;
 
-      if (!user) {
-        return res.status(404).json(formatError('User not found'));
-      }
+    await authService.sendVerificationEmail(email);
 
-      // Debug: Check if password exists
-      if (!user.password) {
-        logger.error('Password field missing for user:', { userId: req.user.id, email: req.user.email });
-        return res.status(500).json(formatError('Password data not found', 'Unable to verify current password'));
-      }
+    sendSuccess(res, HTTP_STATUS.OK, null, 'Verification code sent successfully');
+  });
 
-      // Verify current password
-      const isCurrentPasswordValid = await bcrypt.compare(currentPass, user.password);
-      if (!isCurrentPasswordValid) {
-        return res.status(400).json(formatError(
-          'Invalid current password',
-          'The current password you entered is incorrect'
-        ));
-      }
+  /**
+   * Restore deleted account
+   * POST /api/auth/restore-account
+   */
+  restoreAccount = asyncHandler(async (req, res) => {
+    const { email } = req.body;
 
-      // Hash new password
-      const hashedNewPassword = await bcrypt.hash(newPass, 12);
+    const result = await authService.restoreAccount(email);
 
-      // Update password
-      await User.update(userId, { password: hashedNewPassword });
+    sendSuccess(res, HTTP_STATUS.OK, result, result.message);
+  });
 
-      logger.info('Password changed successfully', { userId });
+  /**
+   * Check account deletion status
+   * POST /api/auth/check-deletion-status
+   */
+  checkDeletionStatus = asyncHandler(async (req, res) => {
+    const { email } = req.body;
 
-      res.json(formatResponse(true, null, 'Password changed successfully'));
+    const status = await authService.checkDeletionStatus(email);
 
-    } catch (error) {
-      logger.error('Change password failed:', { error: error.message });
-      res.status(500).json(formatError('Failed to change password', error.message));
-    }
-  }
+    sendSuccess(res, HTTP_STATUS.OK, status, 'Deletion status retrieved');
+  });
 
-  // Update dark mode preference
-  static async updateDarkModePreference(req, res) {
-    try {
-      const { dark_mode_preference } = req.body;
-      const userId = req.user.id;
+  /**
+   * Logout user
+   * POST /api/auth/logout
+   */
+  logout = asyncHandler(async (req, res) => {
+    const token = req.headers.authorization?.replace('Bearer ', '');
 
-      if (typeof dark_mode_preference !== 'boolean') {
-        return res.status(400).json(formatError(
-          'Invalid input',
-          'dark_mode_preference must be a boolean value'
-        ));
-      }
+    await authService.logout(token);
 
-      const updatedUser = await User.update(userId, { dark_mode_preference });
-      if (!updatedUser) {
-        return res.status(404).json(formatError('User not found'));
-      }
+    sendSuccess(res, HTTP_STATUS.OK, null, 'Logged out successfully');
+  });
 
-      logger.info('Dark mode preference updated', {
-        userId: updatedUser.id,
-        dark_mode_preference
-      });
+  /**
+   * Get current user
+   * GET /api/auth/me
+   */
+  getCurrentUser = asyncHandler(async (req, res) => {
+    const userId = req.user.id;
 
-      res.json(formatResponse(true, {
-        dark_mode_preference: updatedUser.dark_mode_preference
-      }, 'Dark mode preference updated successfully'));
+    // Fetch full user profile from database
+    const user = await userService.getUserById(userId);
 
-    } catch (error) {
-      logger.error('Update dark mode preference failed:', { error: error.message });
-      res.status(500).json(formatError('Failed to update dark mode preference', error.message));
-    }
-  }
+    sendSuccess(res, HTTP_STATUS.OK, { user }, 'User retrieved successfully');
+  });
 }
 
-module.exports = AuthController;
+module.exports = new AuthController();

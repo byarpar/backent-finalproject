@@ -1,40 +1,76 @@
 const express = require('express');
 const SearchController = require('../controllers/searchController');
-const { authenticateToken } = require('../middlewares/auth');
+const { authenticate, optionalAuthenticate } = require('../middlewares/auth');
+const { validate, schemas } = require('../validations/schemas');
 
 const router = express.Router();
 
-// Basic search
+// ============================================
+// Public Search Routes
+// ============================================
+
+/**
+ * @route   GET /api/search
+ * @desc    Basic search across words
+ * @access  Public
+ */
 router.get('/',
+  validate(schemas.search.basicSearch, 'query'),
   SearchController.basicSearch
 );
 
-// Advanced search
-router.post('/advanced',
-  authenticateToken,
-  SearchController.advancedSearch
-);
-
-// Search suggestions/autocomplete
+/**
+ * @route   GET /api/search/suggestions
+ * @desc    Get search suggestions/autocomplete
+ * @access  Public
+ */
 router.get('/suggestions',
+  validate(schemas.search.suggestions, 'query'),
   SearchController.getSearchSuggestions
 );
 
-// Get search history (authenticated users)
+// ============================================
+// Protected Search Routes
+// ============================================
+
+/**
+ * @route   POST /api/search/advanced
+ * @desc    Advanced search with multiple filters
+ * @access  Private
+ */
+router.post('/advanced',
+  authenticate,
+  validate(schemas.search.advancedSearch),
+  SearchController.advancedSearch
+);
+
+/**
+ * @route   GET /api/search/history
+ * @desc    Get user's search history
+ * @access  Private
+ */
 router.get('/history',
-  authenticateToken,
+  authenticate,
   SearchController.getSearchHistory
 );
 
-// Clear search history (authenticated users)
+/**
+ * @route   DELETE /api/search/history
+ * @desc    Clear user's search history
+ * @access  Private
+ */
 router.delete('/history',
-  authenticateToken,
+  authenticate,
   SearchController.clearSearchHistory
 );
 
-// Get search analytics (admin only)
+/**
+ * @route   GET /api/search/analytics
+ * @desc    Get search analytics (Admin only)
+ * @access  Admin
+ */
 router.get('/analytics',
-  authenticateToken,
+  authenticate,
   SearchController.getSearchAnalytics
 );
 

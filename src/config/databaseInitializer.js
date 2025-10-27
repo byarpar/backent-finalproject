@@ -115,15 +115,10 @@ class DatabaseInitializer {
 
       // Drop existing tables if they exist (for development)
       await client.query(`
-        DROP TABLE IF EXISTS user_sessions CASCADE;
         DROP TABLE IF EXISTS user_favorites CASCADE;
         DROP TABLE IF EXISTS discussions CASCADE;
-        DROP TABLE IF EXISTS word_etymology CASCADE;
-        DROP TABLE IF EXISTS word_category_mappings CASCADE;
-        DROP TABLE IF EXISTS word_categories CASCADE;
         DROP TABLE IF EXISTS search_history CASCADE;
         DROP TABLE IF EXISTS audit_logs CASCADE;
-        DROP TABLE IF EXISTS etymology CASCADE;
         DROP TABLE IF EXISTS words CASCADE;
         DROP TABLE IF EXISTS users CASCADE;
       `);
@@ -138,11 +133,18 @@ class DatabaseInitializer {
           full_name VARCHAR(200),
           role VARCHAR(20) DEFAULT 'user' CHECK (role IN ('user', 'admin', 'moderator')),
           is_active BOOLEAN DEFAULT true,
+          account_status VARCHAR(50) DEFAULT 'active' CHECK (account_status IN ('active', 'pending_deletion', 'anonymized')),
+          email_verified BOOLEAN DEFAULT false,
+          email_verification_code VARCHAR(10),
+          email_verification_expires TIMESTAMP WITH TIME ZONE,
           bio TEXT,
           location VARCHAR(255),
           native_language VARCHAR(100),
+          google_id VARCHAR(255) UNIQUE,
+          oauth_provider VARCHAR(50),
           last_login TIMESTAMP WITH TIME ZONE,
-          profile_photo_url VARCHAR(500),
+          profile_photo_url TEXT,
+          deleted_at TIMESTAMP WITH TIME ZONE,
           created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
           updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
         )
@@ -161,63 +163,10 @@ class DatabaseInitializer {
           pronunciation_lisu VARCHAR(255),
           examples JSONB DEFAULT '[]',
           tags JSONB DEFAULT '[]',
-          difficulty_level INTEGER DEFAULT 1 CHECK (difficulty_level BETWEEN 1 AND 5),
-          frequency_score INTEGER DEFAULT 0,
           is_verified BOOLEAN DEFAULT false,
           created_by UUID REFERENCES users(id),
           created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
           updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
-        )
-      `);
-
-      // Create word categories table
-      await client.query(`
-        CREATE TABLE word_categories (
-          id SERIAL PRIMARY KEY,
-          name VARCHAR(100) UNIQUE NOT NULL,
-          description TEXT,
-          color VARCHAR(7),
-          created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
-        )
-      `);
-
-      // Create word category mappings table
-      await client.query(`
-        CREATE TABLE word_category_mappings (
-          id SERIAL PRIMARY KEY,
-          word_id INTEGER REFERENCES words(id) ON DELETE CASCADE,
-          category_id INTEGER REFERENCES word_categories(id) ON DELETE CASCADE,
-          created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-          UNIQUE(word_id, category_id)
-        )
-      `);
-
-      // Create etymology table
-      await client.query(`
-        CREATE TABLE etymology (
-          id SERIAL PRIMARY KEY,
-          word_id INTEGER REFERENCES words(id) ON DELETE CASCADE,
-          origin_language VARCHAR(100),
-          etymology_text TEXT,
-          historical_development TEXT,
-          first_recorded_use VARCHAR(100),
-          related_words JSONB DEFAULT '[]',
-          sources JSONB DEFAULT '[]',
-          notes TEXT,
-          created_by UUID REFERENCES users(id),
-          created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-          updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
-        )
-      `);
-
-      // Create word etymology linking table
-      await client.query(`
-        CREATE TABLE word_etymology (
-          id SERIAL PRIMARY KEY,
-          word_id INTEGER REFERENCES words(id) ON DELETE CASCADE,
-          etymology_id INTEGER REFERENCES etymology(id) ON DELETE CASCADE,
-          created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-          UNIQUE(word_id, etymology_id)
         )
       `);
 
@@ -231,7 +180,6 @@ class DatabaseInitializer {
           author_id UUID REFERENCES users(id),
           is_pinned BOOLEAN DEFAULT false,
           is_locked BOOLEAN DEFAULT false,
-          views_count INTEGER DEFAULT 0,
           last_activity TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
           created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
           updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
@@ -249,17 +197,6 @@ class DatabaseInitializer {
         )
       `);
 
-      // Create user sessions table
-      await client.query(`
-        CREATE TABLE user_sessions (
-          id SERIAL PRIMARY KEY,
-          user_id UUID REFERENCES users(id) ON DELETE CASCADE,
-          session_token VARCHAR(500) UNIQUE NOT NULL,
-          expires_at TIMESTAMP WITH TIME ZONE NOT NULL,
-          created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
-        )
-      `);
-
       // Create search history table
       await client.query(`
         CREATE TABLE search_history (
@@ -268,8 +205,6 @@ class DatabaseInitializer {
           search_query VARCHAR(500) NOT NULL,
           language VARCHAR(20) DEFAULT 'auto',
           results_count INTEGER DEFAULT 0,
-          ip_address INET,
-          user_agent TEXT,
           created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
         )
       `);
@@ -284,8 +219,6 @@ class DatabaseInitializer {
           record_id INTEGER,
           old_values JSONB,
           new_values JSONB,
-          ip_address INET,
-          user_agent TEXT,
           created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
         )
       `);
@@ -315,7 +248,6 @@ class DatabaseInitializer {
       'CREATE INDEX idx_words_lisu ON words USING gin(to_tsvector(\'english\', lisu_word))',
       'CREATE INDEX idx_words_definition ON words USING gin(to_tsvector(\'english\', english_definition))',
       'CREATE INDEX idx_words_created_at ON words(created_at)',
-      'CREATE INDEX idx_words_frequency ON words(frequency_score DESC)',
       'CREATE INDEX idx_words_created_by ON words(created_by)',
 
       'CREATE INDEX idx_word_categories_name ON word_categories(name)',
@@ -323,7 +255,6 @@ class DatabaseInitializer {
       'CREATE INDEX idx_word_category_mappings_category ON word_category_mappings(category_id)',
 
       'CREATE INDEX idx_etymology_word_id ON etymology(word_id)',
-      'CREATE INDEX idx_etymology_origin ON etymology(origin_language)',
       'CREATE INDEX idx_etymology_created_by ON etymology(created_by)',
 
       'CREATE INDEX idx_discussions_category ON discussions(category)',

@@ -2,7 +2,8 @@ const express = require('express');
 const multer = require('multer');
 const path = require('path');
 const DiscussionController = require('../controllers/discussionController');
-const { authenticateToken, optionalAuth } = require('../middlewares/auth');
+const { authenticate, optionalAuthenticate } = require('../middlewares/auth');
+const { validate, schemas } = require('../validations/schemas');
 
 const router = express.Router();
 
@@ -36,29 +37,82 @@ const upload = multer({
   }
 });
 
-// Get all discussions with pagination and filtering
+// ============================================
+// Public Routes
+// ============================================
+
+/**
+ * @route   GET /api/discussions
+ * @desc    Get all discussions with pagination and filtering
+ * @access  Public (with optional auth for personalization)
+ */
 router.get('/',
-  optionalAuth,
+  optionalAuthenticate,
+  validate(schemas.discussion.listDiscussions, 'query'),
   DiscussionController.getAllDiscussions
 );
 
-// Get discussion categories
+/**
+ * @route   GET /api/discussions/categories
+ * @desc    Get discussion categories
+ * @access  Public
+ */
 router.get('/categories',
   DiscussionController.getCategories
 );
 
+// ============================================
+// Protected Routes - Authentication Required
+// ============================================
 
+/**
+ * @route   GET /api/discussions/user/saved
+ * @desc    Get saved discussions for current user
+ * @access  Private
+ */
+router.get('/user/saved',
+  authenticate,
+  DiscussionController.getSavedDiscussions
+);
 
-// Get discussion by ID
+/**
+ * @route   GET /api/discussions/:id/related
+ * @desc    Get related discussions by ID
+ * @access  Public (with optional auth)
+ */
+router.get('/:id/related',
+  optionalAuthenticate,
+  validate(schemas.common.params.id, 'params'),
+  DiscussionController.getRelatedDiscussions
+);
+
+/**
+ * @route   GET /api/discussions/:id
+ * @desc    Get discussion by ID
+ * @access  Public (with optional auth)
+ */
 router.get('/:id',
-  optionalAuth,
+  optionalAuthenticate,
+  validate(schemas.common.params.id, 'params'),
   DiscussionController.getDiscussionById
 );
 
-// Create new discussion (authenticated users only)
+/**
+ * @route   POST /api/discussions
+ * @desc    Create new discussion (supports JSON with base64 or multipart file upload)
+ * @access  Private
+ */
 router.post('/',
-  authenticateToken,
+  authenticate,
   (req, res, next) => {
+    // Check content-type - if it's JSON, skip multer
+    const contentType = req.headers['content-type'] || '';
+    if (contentType.includes('application/json')) {
+      // JSON request with base64 images - skip multer
+      return next();
+    }
+
+    // Otherwise, use multer for multipart/form-data
     upload.array('images', 5)(req, res, (err) => {
       if (err instanceof multer.MulterError) {
         if (err.code === 'LIMIT_FILE_SIZE') {
@@ -89,9 +143,14 @@ router.post('/',
   DiscussionController.createDiscussion
 );
 
-// Update discussion (author or admin only)
+/**
+ * @route   PUT /api/discussions/:id
+ * @desc    Update discussion (author or moderator+)
+ * @access  Private
+ */
 router.put('/:id',
-  authenticateToken,
+  authenticate,
+  validate(schemas.common.params.id, 'params'),
   (req, res, next) => {
     upload.array('images', 5)(req, res, (err) => {
       if (err instanceof multer.MulterError) {
@@ -123,50 +182,131 @@ router.put('/:id',
   DiscussionController.updateDiscussion
 );
 
-// Delete discussion (author or admin only)
+/**
+ * @route   DELETE /api/discussions/:id
+ * @desc    Delete discussion (author or moderator+)
+ * @access  Private
+ */
 router.delete('/:id',
-  authenticateToken,
+  authenticate,
+  validate(schemas.common.params.id, 'params'),
   DiscussionController.deleteDiscussion
 );
 
-// Save/Unsave discussion (authenticated users only)
+/**
+ * @route   POST /api/discussions/:id/vote
+ * @desc    Vote on discussion (upvote/downvote)
+ * @access  Private
+ */
+router.post('/:id/vote',
+  authenticate,
+  validate(schemas.common.params.id, 'params'),
+  validate(schemas.discussion.vote),
+  DiscussionController.voteDiscussion
+);
+
+/**
+ * @route   POST /api/discussions/:id/save
+ * @desc    Save/bookmark discussion
+ * @access  Private
+ */
 router.post('/:id/save',
-  authenticateToken,
+  authenticate,
+  validate(schemas.common.params.id, 'params'),
   DiscussionController.saveDiscussion
 );
 
+/**
+ * @route   DELETE /api/discussions/:id/save
+ * @desc    Unsave/unbookmark discussion
+ * @access  Private
+ */
 router.delete('/:id/save',
-  authenticateToken,
+  authenticate,
+  validate(schemas.common.params.id, 'params'),
   DiscussionController.unsaveDiscussion
 );
 
-// Share discussion (track sharing activity)
-router.post('/:id/share',
-  optionalAuth, // Optional auth since sharing can be done by anonymous users
-  DiscussionController.shareDiscussion
+/**
+ * @route   POST /api/discussions/:id/report
+ * @desc    Report inappropriate discussion
+ * @access  Private
+ */
+router.post('/:id/report',
+  authenticate,
+  validate(schemas.common.params.id, 'params'),
+  validate(schemas.discussion.report),
+  DiscussionController.reportDiscussion
 );
 
-// Like/Unlike discussion (authenticated users only)
-router.post('/:id/like',
-  authenticateToken,
-  DiscussionController.likeDiscussion
+/**
+ * @route   PUT /api/discussions/:id/solve
+ * @desc    Mark discussion as solved (author only)
+ * @access  Private
+ */
+router.put('/:id/solve',
+  authenticate,
+  validate(schemas.common.params.id, 'params'),
+  DiscussionController.markAsSolved
 );
 
-router.delete('/:id/like',
-  authenticateToken,
-  DiscussionController.unlikeDiscussion
+/**
+ * @route   DELETE /api/discussions/:id/solve
+ * @desc    Unmark discussion as solved
+ * @access  Private
+ */
+router.delete('/:id/solve',
+  authenticate,
+  validate(schemas.common.params.id, 'params'),
+  DiscussionController.unmarkAsSolved
 );
 
-// Get saved discussions for user
-router.get('/user/saved',
-  authenticateToken,
-  DiscussionController.getSavedDiscussions
+// ============================================
+// Moderator/Admin Routes
+// ============================================
+
+/**
+ * @route   PUT /api/discussions/:id/pin
+ * @desc    Pin discussion (moderator+)
+ * @access  Moderator+
+ */
+router.put('/:id/pin',
+  authenticate,
+  validate(schemas.common.params.id, 'params'),
+  DiscussionController.pinDiscussion
 );
 
-// Get liked discussions for user
-router.get('/user/liked',
-  authenticateToken,
-  DiscussionController.getLikedDiscussions
+/**
+ * @route   DELETE /api/discussions/:id/pin
+ * @desc    Unpin discussion (moderator+)
+ * @access  Moderator+
+ */
+router.delete('/:id/pin',
+  authenticate,
+  validate(schemas.common.params.id, 'params'),
+  DiscussionController.unpinDiscussion
+);
+
+/**
+ * @route   PUT /api/discussions/:id/lock
+ * @desc    Lock discussion (moderator+)
+ * @access  Moderator+
+ */
+router.put('/:id/lock',
+  authenticate,
+  validate(schemas.common.params.id, 'params'),
+  DiscussionController.lockDiscussion
+);
+
+/**
+ * @route   DELETE /api/discussions/:id/lock
+ * @desc    Unlock discussion (moderator+)
+ * @access  Moderator+
+ */
+router.delete('/:id/lock',
+  authenticate,
+  validate(schemas.common.params.id, 'params'),
+  DiscussionController.unlockDiscussion
 );
 
 module.exports = router;

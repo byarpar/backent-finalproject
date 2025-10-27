@@ -1,0 +1,192 @@
+const passport = require('passport');
+const GoogleStrategy = require('passport-google-oauth20').Strategy;
+const User = require('../models/User');
+const logger = require('../utils/logger');
+
+// Serialize user for session
+passport.serializeUser((user, done) => {
+  done(null, user.id);
+});
+
+// Deserialize user from session
+passport.deserializeUser(async (id, done) => {
+  try {
+    const user = await User.findById(id);
+    done(null, user);
+  } catch (error) {
+    done(error, null);
+  }
+});
+
+// Only configure Google OAuth if credentials are provided
+if (process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET) {
+  // Google OAuth Strategy
+  passport.use(
+    new GoogleStrategy(
+      {
+        clientID: process.env.GOOGLE_CLIENT_ID,
+        clientSecret: process.env.GOOGLE_CLIENT_SECRET,
+        callbackURL: process.env.GOOGLE_CALLBACK_URL || 'http://localhost:3001/api/auth/google/callback',
+        proxy: true
+      },
+      async (accessToken, refreshToken, profile, done) => {
+        try {
+          logger.info('Google OAuth callback received', {
+            profileId: profile.id,
+            email: profile.emails[0]?.value
+          });
+
+          // Extract user information from Google profile
+          const googleId = profile.id;
+          const email = profile.emails[0]?.value;
+          const fullName = profile.displayName;
+          const profilePhoto = profile.photos[0]?.value;
+          const givenName = profile.name?.givenName;
+          const familyName = profile.name?.familyName;
+
+          if (!email) {
+            return done(new Error('No email found in Google profile'), null);
+          }
+
+          // Check if this Google account was deleted
+          const deletedGoogleUser = await User.findDeletedByGoogleId(googleId);
+          if (deletedGoogleUser) {
+            const GRACE_PERIOD_DAYS = 30;
+            const GRACE_PERIOD_MS = GRACE_PERIOD_DAYS * 24 * 60 * 60 * 1000;
+            const deletedDate = new Date(deletedGoogleUser.deleted_at);
+            const now = new Date();
+            const canRestore = (now - deletedDate) <= GRACE_PERIOD_MS && deletedGoogleUser.account_status !== 'anonymized';
+
+            logger.warn('Deleted Google account attempted login', {
+              googleId,
+              email: deletedGoogleUser.email,
+              deletedAt: deletedGoogleUser.deleted_at,
+              canRestore
+            });
+
+            const error = new Error(
+              canRestore
+                ? 'This account has been deleted. You can restore it within 30 days of deletion.'
+                : 'This account has been permanently deleted. If you wish to use this service again, please create a new account.'
+            );
+            error.accountDeleted = true;
+            error.canRestore = canRestore;
+            error.email = deletedGoogleUser.email;
+            return done(error, null);
+          }
+
+          // Check if this email was deleted (from regular account)
+          const deletedEmailUser = await User.findDeletedByEmail(email);
+          if (deletedEmailUser) {
+            const GRACE_PERIOD_DAYS = 30;
+            const GRACE_PERIOD_MS = GRACE_PERIOD_DAYS * 24 * 60 * 60 * 1000;
+            const deletedDate = new Date(deletedEmailUser.deleted_at);
+            const now = new Date();
+            const canRestore = (now - deletedDate) <= GRACE_PERIOD_MS && deletedEmailUser.account_status !== 'anonymized';
+
+            logger.warn('Deleted email account attempted Google login', {
+              email: deletedEmailUser.email,
+              deletedAt: deletedEmailUser.deleted_at,
+              canRestore
+            });
+
+            const error = new Error(
+              canRestore
+                ? 'This account has been deleted. You can restore it within 30 days of deletion.'
+                : 'This account has been permanently deleted. If you wish to use this service again, please create a new account.'
+            );
+            error.accountDeleted = true;
+            error.canRestore = canRestore;
+            error.email = deletedEmailUser.email;
+            return done(error, null);
+          }
+
+          // Check if user exists with this Google ID
+          let user = await User.findByGoogleId(googleId);
+
+          if (user) {
+            // User exists with this Google ID
+            // Only update profile photo if user doesn't have one (or it's still the Google default)
+            const shouldUpdatePhoto = !user.profile_photo_url ||
+              user.profile_photo_url.includes('googleusercontent.com');
+
+            if (shouldUpdatePhoto && profilePhoto && user.profile_photo_url !== profilePhoto) {
+              user = await User.update(user.id, {
+                profile_photo_url: profilePhoto,
+                last_login: new Date()
+              });
+            } else {
+              // Just update last login, keep existing profile photo
+              await User.update(user.id, { last_login: new Date() });
+            }
+
+            logger.info('Existing Google user logged in', {
+              userId: user.id,
+              email: user.email
+            });
+
+            return done(null, user);
+          }
+
+          // Check if user exists with this email (from regular registration)
+          user = await User.findByEmail(email);
+
+          if (user) {
+            // User exists with email - link Google account
+            // Only use Google photo if user doesn't have a profile photo yet
+            const updatedProfilePhoto = user.profile_photo_url || profilePhoto;
+
+            user = await User.update(user.id, {
+              google_id: googleId,
+              oauth_provider: 'google',
+              profile_photo_url: updatedProfilePhoto,
+              email_verified: true, // Google emails are verified
+              last_login: new Date()
+            });
+
+            logger.info('Linked existing email account with Google', {
+              userId: user.id,
+              email: user.email,
+              keptExistingPhoto: !!user.profile_photo_url
+            });
+
+            return done(null, user);
+          }
+
+          // New user - create account
+          const newUser = await User.create({
+            email,
+            password: null, // OAuth users don't have passwords
+            username: email.split('@')[0] + '_' + Math.random().toString(36).substring(7), // Generate unique username
+            full_name: fullName,
+            google_id: googleId,
+            oauth_provider: 'google',
+            profile_photo_url: profilePhoto,
+            email_verified: true, // Google emails are pre-verified
+            role: 'user'
+          });
+
+          logger.info('New Google user created', {
+            userId: newUser.id,
+            email: newUser.email
+          });
+
+          done(null, newUser);
+
+        } catch (error) {
+          logger.error('Google OAuth error:', {
+            error: error.message,
+            stack: error.stack
+          });
+          done(error, null);
+        }
+      }
+    )
+  );
+
+  logger.info('Google OAuth configured successfully');
+} else {
+  logger.warn('Google OAuth not configured - GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET not found in environment variables');
+}
+
+module.exports = passport;
