@@ -125,7 +125,7 @@ class AdminRepository extends BaseRepository {
           page: parseInt(page),
           limit: parseInt(limit),
           total,
-          totalPages: Math.ceil(total / parseInt(limit))
+          total_pages: Math.ceil(total / parseInt(limit))
         }
       };
     } catch (error) {
@@ -138,7 +138,7 @@ class AdminRepository extends BaseRepository {
             page: parseInt(filters.page || 1),
             limit: parseInt(filters.limit || 20),
             total: 0,
-            totalPages: 0
+            total_pages: 0
           }
         };
       }
@@ -286,7 +286,7 @@ class AdminRepository extends BaseRepository {
           page: parseInt(page),
           limit: parseInt(limit),
           total,
-          totalPages: Math.ceil(total / parseInt(limit))
+          total_pages: Math.ceil(total / parseInt(limit))
         }
       };
     } catch (error) {

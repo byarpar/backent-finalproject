@@ -401,9 +401,9 @@ class UserRepository extends BaseRepository {
         page,
         limit,
         total,
-        totalPages,
-        hasNext: page < totalPages,
-        hasPrev: page > 1
+        total_pages: totalPages,
+        has_next: page < totalPages,
+        has_prev: page > 1
       }
     };
   }

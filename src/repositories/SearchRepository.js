@@ -88,7 +88,7 @@ class SearchRepository extends BaseRepository {
         total,
         page,
         limit,
-        totalPages: Math.ceil(total / limit)
+        total_pages: Math.ceil(total / limit)
       };
     } catch (error) {
       logger.error('Error searching words:', error);
@@ -115,7 +115,7 @@ class SearchRepository extends BaseRepository {
           total: 0,
           page,
           limit,
-          totalPages: 0
+          total_pages: 0
         };
       }
 
@@ -158,7 +158,7 @@ class SearchRepository extends BaseRepository {
         total,
         page,
         limit,
-        totalPages: Math.ceil(total / limit)
+        total_pages: Math.ceil(total / limit)
       };
     } catch (error) {
       logger.error('Error in advanced search:', error);
@@ -269,7 +269,7 @@ class SearchRepository extends BaseRepository {
         total,
         page,
         limit,
-        totalPages: Math.ceil(total / limit)
+        total_pages: Math.ceil(total / limit)
       };
     } catch (error) {
       logger.error('Error getting search history:', error);

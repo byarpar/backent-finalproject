@@ -95,7 +95,7 @@ class DiscussionRepository extends BaseRepository {
           page: parseInt(page),
           limit: parseInt(limit),
           total,
-          totalPages: Math.ceil(total / parseInt(limit))
+          total_pages: Math.ceil(total / parseInt(limit))
         }
       };
     } catch (error) {
@@ -505,7 +505,7 @@ class DiscussionRepository extends BaseRepository {
           page: parseInt(page),
           limit: parseInt(limit),
           total,
-          totalPages: Math.ceil(total / parseInt(limit))
+          total_pages: Math.ceil(total / parseInt(limit))
         }
       };
     } catch (error) {

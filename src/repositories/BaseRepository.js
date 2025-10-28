@@ -274,9 +274,9 @@ class BaseRepository {
         page,
         limit,
         total: totalCount,
-        totalPages: Math.ceil(totalCount / limit),
-        hasNext: page < Math.ceil(totalCount / limit),
-        hasPrev: page > 1
+        total_pages: Math.ceil(totalCount / limit),
+        has_next: page < Math.ceil(totalCount / limit),
+        has_prev: page > 1
       }
     };
   }
