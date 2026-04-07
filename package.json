@@ -1,17 +1,16 @@
 {
-  "name": "lisu-dict-backend",
+  "name": "modern-discussion-forum-backend",
   "version": "1.0.0",
-  "description": "Backend API for Lisu Dictionary with etymology",
+  "description": "Backend API for A Modern Discussion Forum - A community platform for discussions and knowledge sharing",
   "main": "src/server.js",
   "scripts": {
     "start": "node src/server.js",
     "dev": "nodemon src/server.js"
   },
   "keywords": [
-    "dictionary",
-    "english",
-    "lisu",
-    "etymology",
+    "forum",
+    "discussion",
+    "community",
     "api"
   ],
   "author": "Your Name",
@@ -31,7 +30,6 @@
     "passport": "^0.7.0",
     "passport-google-oauth20": "^2.0.0",
     "pg": "^8.11.3",
-    "socket.io": "^4.8.1",
     "winston": "^3.17.0",
     "xlsx": "^0.18.5"
   },
