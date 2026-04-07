@@ -5,9 +5,9 @@
 
 const authService = require('../services/authService');
 const userService = require('../services/userService');
-const { sendSuccess, sendCreated, sendError } = require('../utils/response');
+const { successResponse, errorResponse, sendCreated, sendSuccess, sendError } = require('../utils');
 const { asyncHandler } = require('../utils/helpers');
-const { HTTP_STATUS } = require('../config/constants');
+const { constants: { STATUS_CODES: HTTP_STATUS } } = require('../config');
 const logger = require('../utils/logger');
 
 class AuthController {

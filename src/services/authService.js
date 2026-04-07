@@ -7,7 +7,7 @@ const jwt = require('jsonwebtoken');
 const bcrypt = require('bcryptjs');
 const UserRepository = require('../repositories/UserRepository');
 const emailService = require('./emailService');
-const config = require('../config/env');
+const { env: config } = require('../config');
 const logger = require('../utils/logger');
 const { generateVerificationCode } = require('../utils/helpers');
 const {
@@ -15,7 +15,7 @@ const {
   ValidationError,
   NotFoundError,
   ConflictError
-} = require('../utils/errors');
+} = require('../utils');
 
 // Constants
 const GRACE_PERIOD_DAYS = 30;
@@ -280,7 +280,7 @@ class AuthService {
    */
   async verifyToken(token) {
     try {
-      const decoded = jwt.verify(token, config.auth.jwtSecret);
+      const decoded = jwt.verify(token, config.JWT_SECRET);
 
       // Get user
       const user = await UserRepository.findById(decoded.userId);
@@ -309,7 +309,7 @@ class AuthService {
    */
   async refreshToken(refreshToken) {
     try {
-      const decoded = jwt.verify(refreshToken, config.auth.jwtSecret);
+      const decoded = jwt.verify(refreshToken, config.JWT_SECRET);
 
       const user = await UserRepository.findById(decoded.userId);
       if (!user || !user.is_active) {
@@ -381,7 +381,7 @@ class AuthService {
    */
   async resetPassword(token, newPassword) {
     try {
-      const decoded = jwt.verify(token, config.auth.jwtSecret);
+      const decoded = jwt.verify(token, config.JWT_SECRET);
 
       const user = await UserRepository.findById(decoded.userId);
       if (!user) {
@@ -431,8 +431,8 @@ class AuthService {
         full_name: user.full_name,
         role: user.role
       },
-      config.auth.jwtSecret,
-      { expiresIn: config.auth.jwtExpiresIn }
+      config.JWT_SECRET,
+      { expiresIn: config.JWT_EXPIRE }
     );
   }
 
@@ -445,8 +445,8 @@ class AuthService {
         userId: user.id,
         type: 'refresh'
       },
-      config.auth.jwtSecret,
-      { expiresIn: config.auth.jwtRefreshExpiresIn }
+      config.JWT_SECRET,
+      { expiresIn: config.JWT_REFRESH_EXPIRES_IN || '30d' }
     );
   }
 
@@ -460,7 +460,7 @@ class AuthService {
         type: 'reset',
         timestamp: Date.now()
       },
-      config.auth.jwtSecret,
+      config.JWT_SECRET,
       { expiresIn: '1h' }
     );
   }

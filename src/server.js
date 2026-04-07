@@ -1,43 +1,30 @@
 require('dotenv').config();
 const http = require('http');
-const { Server } = require('socket.io');
 const { app, initializeApp } = require('./app');
 const logger = require('./utils/logger');
-const SocketService = require('./services/socketService');
 
 const PORT = process.env.PORT || 3001;
 const NODE_ENV = process.env.NODE_ENV || 'development';
 
 const startServer = async () => {
   try {
+    console.log('=== Server startup debug ===');
+    console.log('1. About to initialize app...');
+
     // Initialize the application (database connections, etc.)
     await initializeApp();
+
+    console.log('2. App initialized, creating HTTP server...');
 
     // Create HTTP server
     const server = http.createServer(app);
 
-    // Initialize Socket.IO
-    const io = new Server(server, {
-      cors: {
-        origin: process.env.FRONTEND_URL || 'http://localhost:3000',
-        credentials: true,
-        methods: ['GET', 'POST']
-      }
-    });
-
-    // Initialize Socket.IO service
-    const socketService = new SocketService(io);
-    socketService.initialize();
-
-    // Make socket service and io available to the app
-    app.set('socketService', socketService);
-    app.set('io', io);
+    console.log('3. About to start listening on port', PORT);
 
     // Start the server
     server.listen(PORT, () => {
       logger.info(`Server running in ${NODE_ENV} mode`);
       logger.info(`Server listening on port ${PORT}`);
-      logger.info(`Socket.IO server initialized`);
       logger.info(`API documentation available at http://localhost:${PORT}/health`);
 
       if (NODE_ENV === 'development') {
@@ -83,6 +70,9 @@ const startServer = async () => {
     process.on('SIGINT', () => gracefulShutdown('SIGINT'));
 
   } catch (error) {
+    console.log('=== Server startup error ===');
+    console.log('Error:', error.message);
+    console.log('Stack:', error.stack);
     logger.error('Failed to start server:', error);
     process.exit(1);
   }

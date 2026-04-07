@@ -4,9 +4,8 @@
  */
 
 const discussionService = require('../services/discussionService');
-const { sendSuccess, sendCreated, sendError } = require('../utils/response');
-const { asyncHandler } = require('../utils/helpers');
-const { HTTP_STATUS } = require('../config/constants');
+const { successResponse, errorResponse, sendSuccess, sendCreated, sendError, asyncHandler } = require('../utils');
+const { constants: { STATUS_CODES: HTTP_STATUS } } = require('../config');
 const logger = require('../utils/logger');
 const notificationController = require('./notificationController');
 

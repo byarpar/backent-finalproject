@@ -3,8 +3,8 @@
  * Data access layer for discussion answers
  */
 
-const BaseRepository = require('../models/BaseRepository');
-const { NotFoundError, ForbiddenError } = require('../utils/errors');
+const BaseRepository = require('./BaseRepository');
+const { NotFoundError, ForbiddenError } = require('../utils');
 const logger = require('../utils/logger');
 
 class AnswerRepository extends BaseRepository {
@@ -354,35 +354,17 @@ class AnswerRepository extends BaseRepository {
    */
   async upsertVote(answerId, userId, voteType) {
     try {
-      const existingVote = await this.getUserVote(answerId, userId);
+      // Use common voting logic from BaseRepository
+      const result = await this._handleVote(
+        'answer_votes',
+        'answer_id',
+        answerId,
+        userId,
+        voteType,
+        this.getUserVote.bind(this)
+      );
 
-      if (existingVote) {
-        if (existingVote === voteType) {
-          // Remove vote (toggle off)
-          await this.db.query(
-            'DELETE FROM answer_votes WHERE answer_id = $1 AND user_id = $2',
-            [answerId, userId]
-          );
-          logger.info('Vote removed', { answerId, userId, voteType });
-          return { action: 'removed', voteType: null };
-        } else {
-          // Update vote
-          await this.db.query(
-            'UPDATE answer_votes SET vote_type = $1, updated_at = CURRENT_TIMESTAMP WHERE answer_id = $2 AND user_id = $3',
-            [voteType, answerId, userId]
-          );
-          logger.info('Vote updated', { answerId, userId, voteType });
-          return { action: 'updated', voteType };
-        }
-      } else {
-        // Create new vote
-        await this.db.query(
-          'INSERT INTO answer_votes (answer_id, user_id, vote_type) VALUES ($1, $2, $3)',
-          [answerId, userId, voteType]
-        );
-        logger.info('Vote created', { answerId, userId, voteType });
-        return { action: 'created', voteType };
-      }
+      return result;
     } catch (error) {
       logger.error('Error upserting vote', { answerId, userId, voteType, error: error.message });
       throw error;

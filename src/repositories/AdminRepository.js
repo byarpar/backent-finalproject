@@ -3,8 +3,8 @@
  * Data access layer for admin-specific operations
  */
 
-const BaseRepository = require('../models/BaseRepository');
-const { NotFoundError } = require('../utils/errors');
+const BaseRepository = require('./BaseRepository');
+const { NotFoundError } = require('../utils');
 const logger = require('../utils/logger');
 
 class AdminRepository extends BaseRepository {
@@ -18,30 +18,23 @@ class AdminRepository extends BaseRepository {
   async getDashboardStats() {
     try {
       const stats = await Promise.all([
-        this.db.query('SELECT COUNT(*) as total FROM words'),
         this.db.query('SELECT COUNT(*) as total FROM users'),
         this.db.query('SELECT COUNT(*) as total FROM users WHERE is_active = true'),
-        this.db.query('SELECT COUNT(*) as total FROM words WHERE created_at >= NOW() - INTERVAL \'7 days\''),
-        this.db.query(`
-          SELECT part_of_speech, COUNT(*) as count 
-          FROM words 
-          WHERE part_of_speech IS NOT NULL 
-          GROUP BY part_of_speech 
-          ORDER BY count DESC 
-          LIMIT 10
-        `)
+        this.db.query('SELECT COUNT(*) as total FROM users WHERE is_active = false'),
+        this.db.query('SELECT COUNT(*) as total FROM discussions'),
+        this.db.query('SELECT COUNT(*) as total FROM answers')
       ]);
 
-      const [totalWords, totalUsers, activeUsers, recentWords, partOfSpeechStats] = stats;
+      const [totalUsers, activeUsers, inactiveUsers, totalDiscussions, totalAnswers] = stats;
 
       return {
         overview: {
-          total_words: parseInt(totalWords.rows[0]?.total || 0),
           total_users: parseInt(totalUsers.rows[0]?.total || 0),
           active_users: parseInt(activeUsers.rows[0]?.total || 0),
-          recent_words: parseInt(recentWords.rows[0]?.total || 0)
+          inactive_users: parseInt(inactiveUsers.rows[0]?.total || 0),
+          total_discussions: parseInt(totalDiscussions.rows[0]?.total || 0),
+          total_answers: parseInt(totalAnswers.rows[0]?.total || 0)
         },
-        part_of_speech_distribution: partOfSpeechStats.rows,
         timestamp: new Date()
       };
     } catch (error) {
@@ -125,7 +118,10 @@ class AdminRepository extends BaseRepository {
           page: parseInt(page),
           limit: parseInt(limit),
           total,
-          total_pages: Math.ceil(total / parseInt(limit))
+          totalPages: Math.ceil(total / parseInt(limit)),
+          total_pages: Math.ceil(total / parseInt(limit)), // Legacy support
+          hasNext: parseInt(page) < Math.ceil(total / parseInt(limit)),
+          hasPrev: parseInt(page) > 1
         }
       };
     } catch (error) {
@@ -138,7 +134,10 @@ class AdminRepository extends BaseRepository {
             page: parseInt(filters.page || 1),
             limit: parseInt(filters.limit || 20),
             total: 0,
-            total_pages: 0
+            totalPages: 0,
+            total_pages: 0, // Legacy support
+            hasNext: false,
+            hasPrev: false
           }
         };
       }
@@ -286,7 +285,10 @@ class AdminRepository extends BaseRepository {
           page: parseInt(page),
           limit: parseInt(limit),
           total,
-          total_pages: Math.ceil(total / parseInt(limit))
+          totalPages: Math.ceil(total / parseInt(limit)),
+          total_pages: Math.ceil(total / parseInt(limit)), // Legacy support
+          hasNext: parseInt(page) < Math.ceil(total / parseInt(limit)),
+          hasPrev: parseInt(page) > 1
         }
       };
     } catch (error) {
@@ -348,7 +350,9 @@ class AdminRepository extends BaseRepository {
           DATE(created_at) as date,
           COUNT(*) as count
         FROM (
-          SELECT created_at FROM words WHERE created_at >= NOW() - INTERVAL '${days} days'
+          SELECT created_at FROM english WHERE created_at >= NOW() - INTERVAL '${days} days'
+          UNION ALL
+          SELECT created_at FROM lisu WHERE created_at >= NOW() - INTERVAL '${days} days'
           UNION ALL
           SELECT created_at FROM users WHERE created_at >= NOW() - INTERVAL '${days} days'
         ) combined
@@ -399,14 +403,23 @@ class AdminRepository extends BaseRepository {
           u.username,
           u.full_name,
           u.email,
-          COUNT(w.id) as word_count,
-          COUNT(CASE WHEN w.is_verified = true THEN 1 END) as verified_count
+          COALESCE(d.discussion_count, 0) + COALESCE(a.answer_count, 0) as contribution_count
         FROM users u
-        LEFT JOIN words w ON u.id = w.created_by
-        WHERE u.role = 'user' OR u.role = 'moderator'
-        GROUP BY u.id, u.username, u.full_name, u.email
-        HAVING COUNT(w.id) > 0
-        ORDER BY word_count DESC
+        LEFT JOIN (
+          SELECT created_by, COUNT(*) as discussion_count 
+          FROM discussions 
+          WHERE created_by IS NOT NULL 
+          GROUP BY created_by
+        ) d ON u.id = d.created_by
+        LEFT JOIN (
+          SELECT created_by, COUNT(*) as answer_count 
+          FROM answers 
+          WHERE created_by IS NOT NULL 
+          GROUP BY created_by
+        ) a ON u.id = a.created_by
+        WHERE (u.role = 'user' OR u.role = 'moderator')
+        AND (COALESCE(d.discussion_count, 0) + COALESCE(a.answer_count, 0) > 0)
+        ORDER BY contribution_count DESC
         LIMIT $1
       `;
 
@@ -420,12 +433,12 @@ class AdminRepository extends BaseRepository {
 
   /**
    * Get pending verification count
+   * Since is_verified column was removed, return 0
    */
   async getPendingVerificationCount() {
     try {
-      const query = 'SELECT COUNT(*) as count FROM words WHERE is_verified = false';
-      const result = await this.db.query(query);
-      return parseInt(result.rows[0].count);
+      // Since is_verified column no longer exists, always return 0
+      return 0;
     } catch (error) {
       logger.error('Error fetching pending verification count', { error: error.message });
       throw error;

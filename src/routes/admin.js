@@ -1,8 +1,7 @@
 const express = require('express');
 const AdminController = require('../controllers/adminController');
-const { authenticate, authorize } = require('../middlewares/auth');
+const { authenticate, authorize, upload } = require('../middlewares');
 const { validate, schemas } = require('../validations/schemas');
-const { uploadSingle, handleUploadError } = require('../middlewares/upload');
 
 const router = express.Router();
 
@@ -73,95 +72,6 @@ router.delete('/users/:id',
   authorize('admin', 'super_admin'),
   validate(schemas.common.params.id, 'params'),
   AdminController.deleteUser
-);
-
-// ============================================
-// Word Management Routes
-// ============================================
-
-/**
- * @route   GET /api/admin/words
- * @desc    Get all words with admin filters
- * @access  Admin
- */
-router.get('/words',
-  authenticate,
-  authorize('admin', 'super_admin'),
-  validate(schemas.admin.listWords, 'query'),
-  AdminController.getAllWords
-);
-
-/**
- * @route   POST /api/admin/words
- * @desc    Create new word (admin)
- * @access  Admin
- */
-router.post('/words',
-  authenticate,
-  authorize('admin', 'super_admin'),
-  validate(schemas.admin.createWord),
-  AdminController.createWord
-);
-
-/**
- * @route   PUT /api/admin/words/:id
- * @desc    Update word (admin)
- * @access  Admin
- */
-router.put('/words/:id',
-  authenticate,
-  authorize('admin', 'super_admin'),
-  validate(schemas.common.params.id, 'params'),
-  validate(schemas.admin.updateWord),
-  AdminController.updateWord
-);
-
-/**
- * @route   POST /api/admin/words/bulk
- * @desc    Bulk import words from JSON
- * @access  Admin
- */
-router.post('/words/bulk',
-  authenticate,
-  authorize('admin', 'super_admin'),
-  validate(schemas.admin.bulkImport),
-  AdminController.bulkWords
-);
-
-/**
- * @route   POST /api/admin/words/import
- * @desc    Import words from Excel/CSV file
- * @access  Admin
- */
-router.post('/words/import',
-  authenticate,
-  authorize('admin', 'super_admin'),
-  uploadSingle,
-  handleUploadError,
-  AdminController.importWords
-);
-
-/**
- * @route   POST /api/admin/words/export
- * @desc    Export words to Excel/CSV/JSON
- * @access  Admin
- */
-router.post('/words/export',
-  authenticate,
-  authorize('admin', 'super_admin'),
-  validate(schemas.admin.exportWords),
-  AdminController.exportWords
-);
-
-/**
- * @route   GET /api/admin/words/template
- * @desc    Download import template file
- * @access  Admin
- */
-router.get('/words/template',
-  authenticate,
-  authorize('admin', 'super_admin'),
-  AdminController.downloadTemplate
 );
 
 // ============================================

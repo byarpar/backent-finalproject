@@ -3,8 +3,8 @@
  * Data access layer for discussion forum
  */
 
-const BaseRepository = require('../models/BaseRepository');
-const { NotFoundError, ConflictError } = require('../utils/errors');
+const BaseRepository = require('./BaseRepository');
+const { NotFoundError, ConflictError } = require('../utils');
 const logger = require('../utils/logger');
 
 class DiscussionRepository extends BaseRepository {
@@ -23,6 +23,7 @@ class DiscussionRepository extends BaseRepository {
       d.upvotes,
       d.downvotes,
       d.answers_count,
+      d.views_count,
       d.is_solved,
       d.is_pinned,
       d.is_locked,
@@ -44,7 +45,7 @@ class DiscussionRepository extends BaseRepository {
         limit = 10,
         category,
         search,
-        sortBy = 'recent',
+        sortBy = 'latest',
         authorId,
         filter
       } = filters;
@@ -95,7 +96,10 @@ class DiscussionRepository extends BaseRepository {
           page: parseInt(page),
           limit: parseInt(limit),
           total,
-          total_pages: Math.ceil(total / parseInt(limit))
+          totalPages: Math.ceil(total / parseInt(limit)),
+          total_pages: Math.ceil(total / parseInt(limit)), // Legacy support
+          hasNext: parseInt(page) < Math.ceil(total / parseInt(limit)),
+          hasPrev: parseInt(page) > 1
         }
       };
     } catch (error) {
@@ -163,10 +167,38 @@ class DiscussionRepository extends BaseRepository {
         imagesCount: imagesArray.length
       });
 
+      // Ensure all required columns exist before inserting
+      await this.db.query(`
+        DO $$ 
+        BEGIN 
+          IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='discussions' AND column_name='tags') THEN
+            ALTER TABLE discussions ADD COLUMN tags TEXT[] DEFAULT '{}';
+          END IF;
+          IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='discussions' AND column_name='images') THEN
+            ALTER TABLE discussions ADD COLUMN images JSONB;
+          END IF;
+          IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='discussions' AND column_name='vote_count') THEN
+            ALTER TABLE discussions ADD COLUMN vote_count INTEGER DEFAULT 0;
+          END IF;
+          IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='discussions' AND column_name='upvotes') THEN
+            ALTER TABLE discussions ADD COLUMN upvotes INTEGER DEFAULT 0;
+          END IF;
+          IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='discussions' AND column_name='downvotes') THEN
+            ALTER TABLE discussions ADD COLUMN downvotes INTEGER DEFAULT 0;
+          END IF;
+          IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='discussions' AND column_name='views_count') THEN
+            ALTER TABLE discussions ADD COLUMN views_count INTEGER DEFAULT 0;
+          END IF;
+          IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='discussions' AND column_name='answers_count') THEN
+            ALTER TABLE discussions ADD COLUMN answers_count INTEGER DEFAULT 0;
+          END IF;
+        END $$;
+      `);
+
       const query = `
         INSERT INTO ${this.tableName} (
-          author_id, title, content, category, tags, images
-        ) VALUES ($1, $2, $3, $4, $5, $6)
+          author_id, title, content, category, tags, images, vote_count, upvotes, downvotes, views_count
+        ) VALUES ($1, $2, $3, $4, $5, $6, 0, 0, 0, 0)
         RETURNING *
       `;
 
@@ -210,8 +242,7 @@ class DiscussionRepository extends BaseRepository {
             content = $2,
             category = $3,
             tags = $4,
-            images = $5,
-            updated_at = CURRENT_TIMESTAMP
+            images = $5
         WHERE id = $6
         RETURNING *
       `;
@@ -263,51 +294,108 @@ class DiscussionRepository extends BaseRepository {
 
   async getUserVote(discussionId, userId) {
     try {
+      // Create discussion_votes table if it doesn't exist
+      await this.db.query(`
+        CREATE TABLE IF NOT EXISTS discussion_votes (
+          id SERIAL PRIMARY KEY,
+          discussion_id INTEGER REFERENCES discussions(id) ON DELETE CASCADE,
+          user_id UUID REFERENCES users(id) ON DELETE CASCADE,
+          vote_type VARCHAR(10) NOT NULL CHECK (vote_type IN ('up', 'down')),
+          created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+          updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+          UNIQUE(discussion_id, user_id)
+        )
+      `);
+
       const query = 'SELECT vote_type FROM discussion_votes WHERE discussion_id = $1 AND user_id = $2';
       const result = await this.db.query(query, [discussionId, userId]);
       return result.rows[0]?.vote_type || null;
     } catch (error) {
       logger.error('Error getting user vote', { discussionId, userId, error: error.message });
-      throw error;
+      return null; // Return null instead of throwing error if table doesn't exist
     }
   }
 
   async upsertVote(discussionId, userId, voteType) {
     try {
-      const existingVote = await this.getUserVote(discussionId, userId);
+      // Create discussion_votes table if it doesn't exist
+      await this.db.query(`
+        CREATE TABLE IF NOT EXISTS discussion_votes (
+          id SERIAL PRIMARY KEY,
+          discussion_id INTEGER REFERENCES discussions(id) ON DELETE CASCADE,
+          user_id UUID REFERENCES users(id) ON DELETE CASCADE,
+          vote_type VARCHAR(10) NOT NULL CHECK (vote_type IN ('up', 'down')),
+          created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+          updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+          UNIQUE(discussion_id, user_id)
+        )
+      `);
 
-      if (existingVote) {
-        if (existingVote === voteType) {
-          // Remove vote (toggle off)
-          await this.db.query(
-            'DELETE FROM discussion_votes WHERE discussion_id = $1 AND user_id = $2',
-            [discussionId, userId]
-          );
-          return { action: 'removed', voteType: null };
-        } else {
-          // Update vote
-          await this.db.query(
-            'UPDATE discussion_votes SET vote_type = $1, updated_at = CURRENT_TIMESTAMP WHERE discussion_id = $2 AND user_id = $3',
-            [voteType, discussionId, userId]
-          );
-          return { action: 'updated', voteType };
-        }
-      } else {
-        // Create new vote
-        await this.db.query(
-          'INSERT INTO discussion_votes (discussion_id, user_id, vote_type) VALUES ($1, $2, $3)',
-          [discussionId, userId, voteType]
-        );
-        return { action: 'created', voteType };
-      }
+      // Add vote_count, upvotes, downvotes columns to discussions table if they don't exist
+      await this.db.query(`
+        DO $$ 
+        BEGIN 
+          IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='discussions' AND column_name='vote_count') THEN
+            ALTER TABLE discussions ADD COLUMN vote_count INTEGER DEFAULT 0;
+          END IF;
+          IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='discussions' AND column_name='upvotes') THEN
+            ALTER TABLE discussions ADD COLUMN upvotes INTEGER DEFAULT 0;
+          END IF;
+          IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='discussions' AND column_name='downvotes') THEN
+            ALTER TABLE discussions ADD COLUMN downvotes INTEGER DEFAULT 0;
+          END IF;
+        END $$;
+      `);
+
+      // Use common voting logic from BaseRepository
+      const result = await this._handleVote(
+        'discussion_votes',
+        'discussion_id',
+        discussionId,
+        userId,
+        voteType,
+        this.getUserVote.bind(this)
+      );
+
+      // Update vote counts in discussions table
+      await this.updateVoteCounts(discussionId);
+
+      return result;
     } catch (error) {
       logger.error('Error upserting vote', { discussionId, userId, voteType, error: error.message });
       throw error;
     }
   }
 
+  async updateVoteCounts(discussionId) {
+    try {
+      const countsQuery = `
+        SELECT 
+          COUNT(*) FILTER (WHERE vote_type = 'up') as upvotes,
+          COUNT(*) FILTER (WHERE vote_type = 'down') as downvotes,
+          COUNT(*) FILTER (WHERE vote_type = 'up') - COUNT(*) FILTER (WHERE vote_type = 'down') as vote_count
+        FROM discussion_votes
+        WHERE discussion_id = $1
+      `;
+      const result = await this.db.query(countsQuery, [discussionId]);
+      const { upvotes, downvotes, vote_count } = result.rows[0];
+
+      // Update discussions table
+      await this.db.query(
+        'UPDATE discussions SET vote_count = $1, upvotes = $2, downvotes = $3 WHERE id = $4',
+        [vote_count || 0, upvotes || 0, downvotes || 0, discussionId]
+      );
+
+      return { vote_count: vote_count || 0, upvotes: upvotes || 0, downvotes: downvotes || 0 };
+    } catch (error) {
+      logger.error('Error updating vote counts', { discussionId, error: error.message });
+      throw error;
+    }
+  }
+
   async getVoteCounts(discussionId) {
     try {
+      // Try to get from discussions table first
       const query = 'SELECT vote_count, upvotes, downvotes FROM discussions WHERE id = $1';
       const result = await this.db.query(query, [discussionId]);
 
@@ -315,7 +403,21 @@ class DiscussionRepository extends BaseRepository {
         throw new NotFoundError('Discussion not found');
       }
 
-      return result.rows[0];
+      // If columns don't exist or are null, calculate from votes table
+      let { vote_count, upvotes, downvotes } = result.rows[0];
+
+      if (vote_count === null || vote_count === undefined) {
+        const counts = await this.updateVoteCounts(discussionId);
+        vote_count = counts.vote_count;
+        upvotes = counts.upvotes;
+        downvotes = counts.downvotes;
+      }
+
+      return {
+        vote_count: vote_count || 0,
+        upvotes: upvotes || 0,
+        downvotes: downvotes || 0
+      };
     } catch (error) {
       logger.error('Error getting vote counts', { discussionId, error: error.message });
       throw error;
@@ -505,7 +607,10 @@ class DiscussionRepository extends BaseRepository {
           page: parseInt(page),
           limit: parseInt(limit),
           total,
-          total_pages: Math.ceil(total / parseInt(limit))
+          totalPages: Math.ceil(total / parseInt(limit)),
+          total_pages: Math.ceil(total / parseInt(limit)), // Legacy support
+          hasNext: parseInt(page) < Math.ceil(total / parseInt(limit)),
+          hasPrev: parseInt(page) > 1
         }
       };
     } catch (error) {
@@ -653,17 +758,26 @@ class DiscussionRepository extends BaseRepository {
     return whereConditions;
   }
 
+  /**
+   * Build ORDER BY clause for discussions sorting
+   * @param {string} sortBy - Sort option (latest, popular, views, newest)
+   * @returns {string} SQL ORDER BY clause
+   */
   _buildOrderByClause(sortBy) {
     switch (sortBy) {
       case 'latest':
+      case 'recent':
+        // Sort by most recently active (replies, edits, votes update the updated_at)
         return ' ORDER BY d.updated_at DESC, d.created_at DESC';
       case 'popular':
+        // Sort by engagement score (votes + replies weighted)
         return ' ORDER BY (d.vote_count + (d.answers_count * 2)) DESC, d.created_at DESC';
+      case 'views':
+        // Sort by view count (most viewed discussions)
+        return ' ORDER BY d.views_count DESC, d.created_at DESC';
       case 'newest':
+        // Sort by creation date (brand new discussions)
         return ' ORDER BY d.created_at DESC';
-      case 'oldest':
-        return ' ORDER BY d.created_at ASC';
-      case 'recent':
       default:
         return ' ORDER BY d.updated_at DESC, d.created_at DESC';
     }
@@ -719,6 +833,78 @@ class DiscussionRepository extends BaseRepository {
       return counts;
     } catch (error) {
       logger.error('Error getting counts by category', { error: error.message });
+      throw error;
+    }
+  }
+
+  /**
+   * Increment view count for a discussion (one view per user)
+   */
+  async incrementViewCount(discussionId, userId = null) {
+    try {
+      // Ensure views_count column exists
+      await this.db.query(`
+        DO $$ 
+        BEGIN 
+          IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='discussions' AND column_name='views_count') THEN
+            ALTER TABLE discussions ADD COLUMN views_count INTEGER DEFAULT 0;
+          END IF;
+        END $$;
+      `);
+
+      // Create discussion_views table if it doesn't exist (to track unique views)
+      // Simpler version without foreign keys to avoid issues
+      await this.db.query(`
+        CREATE TABLE IF NOT EXISTS discussion_views (
+          discussion_id VARCHAR(255) NOT NULL,
+          user_id UUID NOT NULL,
+          viewed_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+          PRIMARY KEY (discussion_id, user_id)
+        )
+      `);
+
+      let viewCounted = false;
+
+      if (userId) {
+        // Use INSERT with ON CONFLICT to atomically check and insert
+        // This prevents race conditions where multiple requests arrive simultaneously
+        const insertResult = await this.db.query(
+          `INSERT INTO discussion_views (discussion_id, user_id) 
+           VALUES ($1, $2) 
+           ON CONFLICT (discussion_id, user_id) DO NOTHING
+           RETURNING discussion_id`,
+          [discussionId, userId]
+        );
+
+        // If a row was returned, it means this was a new view
+        viewCounted = insertResult.rows.length > 0;
+      } else {
+        // Anonymous user - always count the view
+        viewCounted = true;
+      }
+
+      if (viewCounted) {
+        const query = `
+          UPDATE discussions 
+          SET views_count = COALESCE(views_count, 0) + 1 
+          WHERE id = $1 
+          RETURNING views_count
+        `;
+        const result = await this.db.query(query, [discussionId]);
+
+        if (result.rows.length > 0) {
+          logger.info('View count incremented', { discussionId, userId: userId || 'anonymous', views: result.rows[0].views_count });
+          return result.rows[0].views_count;
+        }
+      } else {
+        logger.debug('View already counted for this user', { discussionId, userId });
+        const result = await this.db.query('SELECT views_count FROM discussions WHERE id = $1', [discussionId]);
+        return result.rows[0]?.views_count || 0;
+      }
+
+      return 0;
+    } catch (error) {
+      logger.error('Error incrementing view count', { discussionId, error: error.message });
       throw error;
     }
   }

@@ -1,7 +1,7 @@
 const express = require('express');
 const passport = require('passport');
 const AuthController = require('../controllers/authController');
-const { authenticate } = require('../middlewares/auth');
+const { authenticate } = require('../middlewares');
 const { validate, schemas } = require('../validations/schemas');
 
 const router = express.Router();
@@ -91,42 +91,61 @@ router.post('/check-deletion-status',
 );
 
 // ============================================
-// Google OAuth Routes
+// Google OAuth Routes (Conditional)
 // ============================================
 
-/**
- * @route   GET /api/auth/google
- * @desc    Redirect to Google OAuth consent screen
- * @access  Public
- */
-router.get('/google',
-  passport.authenticate('google', { scope: ['profile', 'email'] })
-);
+// Only enable Google OAuth routes if credentials are configured
+if (process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET) {
+  /**
+   * @route   GET /api/auth/google
+   * @desc    Redirect to Google OAuth consent screen
+   * @access  Public
+   */
+  router.get('/google',
+    passport.authenticate('google', { scope: ['profile', 'email'] })
+  );
 
-/**
- * @route   GET /api/auth/google/callback
- * @desc    Google OAuth callback
- * @access  Public
- */
-router.get('/google/callback',
-  passport.authenticate('google', {
-    session: false,
-    failWithError: true
-  }),
-  AuthController.googleCallback,
-  // Error handler for OAuth failures
-  (err, req, res, next) => {
-    const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
+  /**
+   * @route   GET /api/auth/google/callback
+   * @desc    Google OAuth callback
+   * @access  Public
+   */
+  router.get('/google/callback',
+    passport.authenticate('google', {
+      session: false,
+      failWithError: true
+    }),
+    AuthController.googleCallback,
+    // Error handler for OAuth failures
+    (err, req, res, next) => {
+      const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
 
-    // Check if account was deleted
-    if (err.accountDeleted) {
-      const errorType = err.canRestore ? 'account_deleted_restorable' : 'account_deleted_permanent';
-      return res.redirect(`${frontendUrl}/auth/callback?error=${errorType}&message=${encodeURIComponent(err.message)}&email=${encodeURIComponent(err.email || '')}`);
+      // Check if account was deleted
+      if (err.accountDeleted) {
+        const errorType = err.canRestore ? 'account_deleted_restorable' : 'account_deleted_permanent';
+        return res.redirect(`${frontendUrl}/auth/callback?error=${errorType}&message=${encodeURIComponent(err.message)}&email=${encodeURIComponent(err.email || '')}`);
+      }
+
+      res.redirect(`${frontendUrl}/auth/callback?error=authentication_failed`);
     }
+  );
+} else {
+  // Google OAuth is not configured - provide fallback routes that return errors
+  router.get('/google', (req, res) => {
+    res.status(503).json({
+      success: false,
+      error: {
+        message: 'Google OAuth is not configured on this server',
+        code: 'OAUTH_NOT_CONFIGURED'
+      }
+    });
+  });
 
-    res.redirect(`${frontendUrl}/auth/callback?error=authentication_failed`);
-  }
-);
+  router.get('/google/callback', (req, res) => {
+    const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
+    res.redirect(`${frontendUrl}/auth/callback?error=oauth_not_configured`);
+  });
+}
 
 // ============================================
 // Protected Routes - Authentication Required

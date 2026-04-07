@@ -1,0 +1,59 @@
+# Dependencies
+node_modules/
+package-lock.json
+
+# Environment Variables
+.env
+.env.local
+.env.development
+.env.production
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+debug-server.log
+server-output.log
+server-start.log
+server.log
+
+# OS Files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Uploads (keep structure, ignore content)
+uploads/*
+!uploads/.gitkeep
+!uploads/imports/.gitkeep
+!uploads/profiles/.gitkeep
+
+# Temporary files
+*.tmp
+*.temp
+*.bak
+*.backup
+
+# Migration scripts (if one-time use)
+*.sh.backup
+
+# Test files
+coverage/
+.nyc_output/
+
+# Build files (if any)
+dist/
+build/

@@ -5,7 +5,8 @@
 
 const DiscussionRepository = require('../repositories/DiscussionRepository');
 const UserRepository = require('../repositories/UserRepository');
-const { NotFoundError, ValidationError, ForbiddenError } = require('../utils/errors');
+const { extractMentions, processMentions, getMentionStats, normalizeMentions, getMentionContext } = require('../utils');
+const { NotFoundError, ValidationError, ForbiddenError } = require('../utils');
 const logger = require('../utils/logger');
 
 class DiscussionService {
@@ -26,47 +27,125 @@ class DiscussionService {
         color: '#6366f1',
         description: 'General topics and casual conversation'
       },
-      'language-learning': {
-        name: 'Language Learning',
-        icon: '📚',
-        color: '#f59e0b',
-        description: 'Discuss language learning tips and resources'
-      },
-      grammar: {
-        name: 'Grammar',
-        icon: '📝',
-        color: '#10b981',
-        description: 'Questions about grammar rules and usage'
-      },
-      vocabulary: {
-        name: 'Vocabulary',
-        icon: '📖',
-        color: '#f59e0b',
-        description: 'Learn and discuss new words and phrases'
-      },
-      culture: {
-        name: 'Culture & Traditions',
-        icon: '🎭',
+      programming: {
+        name: 'Programming',
+        icon: '💻',
         color: '#ec4899',
-        description: 'Share and discuss cultural practices and traditions'
+        description: 'General programming concepts and best practices'
       },
-      pronunciation: {
-        name: 'Pronunciation',
-        icon: '🗣️',
-        color: '#8b5cf6',
-        description: 'Practice and discuss pronunciation'
-      },
-      translation: {
-        name: 'Translation',
+      'web-development': {
+        name: 'Web Development',
         icon: '🌐',
-        color: '#6366f1',
-        description: 'Request and provide translations'
-      },
-      etymology: {
-        name: 'Etymology',
-        icon: '📜',
         color: '#f59e0b',
-        description: 'Explore word origins and history'
+        description: 'Web development frameworks, tools, and techniques'
+      },
+      cybersecurity: {
+        name: 'Cybersecurity',
+        icon: '🔒',
+        color: '#ef4444',
+        description: 'Security threats, vulnerabilities, and best practices'
+      },
+      'data-science': {
+        name: 'Data Science',
+        icon: '📊',
+        color: '#10b981',
+        description: 'Data analysis, visualization, and insights'
+      },
+      'artificial-intelligence': {
+        name: 'Artificial Intelligence',
+        icon: '🤖',
+        color: '#8b5cf6',
+        description: 'AI concepts, neural networks, and machine learning'
+      },
+      'machine-learning': {
+        name: 'Machine Learning',
+        icon: '🧠',
+        color: '#3b82f6',
+        description: 'ML models, training, and frameworks'
+      },
+      'cloud-computing': {
+        name: 'Cloud Computing',
+        icon: '☁️',
+        color: '#06b6d4',
+        description: 'Cloud platforms, deployment, and infrastructure'
+      },
+      networking: {
+        name: 'Networking',
+        icon: '🔗',
+        color: '#f97316',
+        description: 'Network protocols, routing, and infrastructure'
+      },
+      'database-systems': {
+        name: 'Database Systems',
+        icon: '🗄️',
+        color: '#14b8a6',
+        description: 'SQL, NoSQL, optimization, and design'
+      },
+      'software-engineering': {
+        name: 'Software Engineering',
+        icon: '⚙️',
+        color: '#64748b',
+        description: 'Architecture, design patterns, and best practices'
+      },
+      devops: {
+        name: 'DevOps',
+        icon: '🚀',
+        color: '#ff6b6b',
+        description: 'CI/CD, containerization, and automation'
+      },
+      'system-administration': {
+        name: 'System Administration',
+        icon: '👨‍💼',
+        color: '#a78bfa',
+        description: 'Server management, Linux, and administration'
+      },
+      'mobile-app-development': {
+        name: 'Mobile App Development',
+        icon: '📱',
+        color: '#06b6d4',
+        description: 'iOS, Android, and cross-platform development'
+      },
+      'game-development': {
+        name: 'Game Development',
+        icon: '🎮',
+        color: '#ec4899',
+        description: 'Game engines, graphics, and gameplay'
+      },
+      'ui-ux-design': {
+        name: 'UI/UX Design',
+        icon: '🎨',
+        color: '#f59e0b',
+        description: 'Design principles, tools, and user experience'
+      },
+      'computer-architecture': {
+        name: 'Computer Architecture',
+        icon: '🏗️',
+        color: '#10b981',
+        description: 'CPU, memory, and system architecture'
+      },
+      'operating-systems': {
+        name: 'Operating Systems',
+        icon: '🖥️',
+        color: '#6366f1',
+        description: 'OS concepts, kernel, and processes'
+      },
+      'algorithms-data-structures': {
+        name: 'Algorithms & Data Structures',
+        icon: '📐',
+        color: '#f97316',
+        description: 'Algorithms, complexity, and data structure design'
+      },
+      iot: {
+        name: 'Internet of Things (IoT)',
+        icon: '📡',
+        color: '#14b8a6',
+        description: 'Embedded systems, sensors, and IoT devices'
+      },
+      'blockchain-technology': {
+        name: 'Blockchain Technology',
+        icon: '⛓️',
+        color: '#f59e0b',
+        description: 'Cryptocurrency, smart contracts, and blockchain'
       },
       members: {
         name: 'Members',
@@ -143,6 +222,11 @@ class DiscussionService {
     try {
       const discussion = await DiscussionRepository.findByIdWithContext(discussionId, userId);
 
+      // Increment view count (async, don't wait) - only counts once per user
+      DiscussionRepository.incrementViewCount(discussionId, userId).catch(err =>
+        logger.warn('Failed to increment view count', { discussionId, error: err.message })
+      );
+
       // Enrich with category metadata
       const categoryMetadata = this.getCategoryMetadata();
       const enrichedDiscussion = this._enrichDiscussion(discussion, categoryMetadata);
@@ -172,6 +256,13 @@ class DiscussionService {
       // Process images
       const processedImages = this._processImages(images);
 
+      // Extract mentions from title and content
+      const allMentions = [
+        ...extractMentions(title),
+        ...extractMentions(content)
+      ];
+      const uniqueMentions = normalizeMentions(allMentions);
+
       // Create discussion
       const discussion = await DiscussionRepository.create({
         author_id: userId,
@@ -185,9 +276,15 @@ class DiscussionService {
       // Get author info
       const author = await UserRepository.findById(userId);
 
+      // Handle mentions - create notifications for mentioned users
+      if (uniqueMentions.length > 0) {
+        await this._handleMentions(uniqueMentions, discussion, author, 'discussion');
+      }
+
       logger.info('Discussion created', {
         discussionId: discussion.id,
         userId,
+        mentions: uniqueMentions.length,
         category
       });
 
@@ -224,6 +321,25 @@ class DiscussionService {
       const processedTags = this._processTags(tags);
       const processedImages = this._processImages(images);
 
+      // Extract mentions from title and content
+      const allMentions = [
+        ...extractMentions(title),
+        ...extractMentions(content)
+      ];
+      const uniqueMentions = normalizeMentions(allMentions);
+
+      // Get old mentions for comparison (avoid notifying on old mentions)
+      const oldMentions = [
+        ...extractMentions(discussion.title || ''),
+        ...extractMentions(discussion.content || '')
+      ];
+      const normalizedOldMentions = normalizeMentions(oldMentions);
+
+      // Find new mentions (not in old content)
+      const newMentions = uniqueMentions.filter(mention =>
+        !normalizedOldMentions.includes(mention)
+      );
+
       // Update discussion
       const updatedDiscussion = await DiscussionRepository.update(discussionId, {
         title,
@@ -233,7 +349,17 @@ class DiscussionService {
         images: processedImages
       });
 
-      logger.info('Discussion updated', { discussionId, userId });
+      // Handle new mentions - create notifications only for newly mentioned users
+      if (newMentions.length > 0) {
+        const author = await UserRepository.findById(userId);
+        await this._handleMentions(newMentions, updatedDiscussion, author, 'discussion', true);
+      }
+
+      logger.info('Discussion updated', {
+        discussionId,
+        userId,
+        newMentions: newMentions.length
+      });
 
       return updatedDiscussion;
     } catch (error) {
@@ -618,6 +744,89 @@ class DiscussionService {
     }
 
     return processedImages;
+  }
+
+  /**
+   * Handle mentions - find mentioned users and create notifications
+   * @param {Array<string>} mentions - Array of mentioned usernames
+   * @param {Object} discussion - Discussion object
+   * @param {Object} author - Author object
+   * @param {string} type - Type of content (discussion, reply, etc.)
+   * @param {boolean} isUpdate - Whether this is an update (default: false)
+   * @private
+   */
+  async _handleMentions(mentions, discussion, author, type = 'discussion', isUpdate = false) {
+    if (!mentions || mentions.length === 0) {
+      return;
+    }
+
+    try {
+      // Find users by username (mentions are normalized to lowercase)
+      const users = await UserRepository.findByUsernames(mentions);
+
+      if (users.length === 0) {
+        logger.info('No valid users found for mentions', { mentions });
+        return;
+      }
+
+      // Prepare notifications for mentioned users
+      const notifications = [];
+
+      for (const user of users) {
+        // Don't notify the author of their own mention
+        if (user.id === author.id) {
+          continue;
+        }
+
+        // Get mention context from content
+        const mentionContext = getMentionContext(
+          `${discussion.title} ${discussion.content}`,
+          user.username,
+          150
+        );
+
+        const actionText = isUpdate ? 'updated a discussion' : 'mentioned you in a discussion';
+        const message = `${author.username || author.full_name || 'Someone'} ${actionText}: "${discussion.title}"`;
+
+        notifications.push({
+          userId: user.id,
+          type: 'mention',
+          category: 'mentions',
+          message,
+          title: `Mentioned in Discussion`,
+          content: mentionContext,
+          targetLink: `/discussions/${discussion.id}`,
+          targetId: discussion.id,
+          targetType: type,
+          actorId: author.id,
+          actorName: author.username || author.full_name,
+          actorAvatar: author.profile_photo_url,
+          metadata: {
+            discussionId: discussion.id,
+            discussionTitle: discussion.title,
+            mentionType: type,
+            isUpdate
+          }
+        });
+      }
+
+      // Notifications have been removed - mentions are still tracked but no notifications sent
+      if (notifications.length > 0) {
+        logger.info('Mentions processed (notifications disabled)', {
+          discussionId: discussion.id,
+          mentionedUsers: notifications.map(n => n.userId),
+          isUpdate
+        });
+      }
+
+    } catch (error) {
+      // Log error but don't fail the discussion creation/update
+      logger.error('Error handling mentions', {
+        discussionId: discussion.id,
+        mentions,
+        error: error.message
+      });
+    }
   }
 }
 

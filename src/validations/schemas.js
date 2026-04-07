@@ -4,8 +4,14 @@
  */
 
 const Joi = require('joi');
-const { PARTS_OF_SPEECH, USER_ROLES, PASSWORD, PAGINATION, DISCUSSION } = require('../config/constants');
-const { ValidationError } = require('../utils/errors');
+// Add parts of speech array since it's missing from config
+const PARTS_OF_SPEECH = [
+  'noun', 'verb', 'adjective', 'adverb', 'pronoun', 'preposition',
+  'conjunction', 'interjection', 'determiner', 'article'
+];
+
+const { constants: { USER_ROLES, CONTENT_LIMITS, PAGINATION, DISCUSSION_CATEGORIES } } = require('../config');
+const { ValidationError } = require('../utils');
 
 /**
  * Validation middleware factory
@@ -62,8 +68,8 @@ const commonSchemas = {
     }),
 
   password: Joi.string()
-    .min(PASSWORD.MIN_LENGTH)
-    .max(PASSWORD.MAX_LENGTH)
+    .min(CONTENT_LIMITS.PASSWORD_MIN)
+    .max(CONTENT_LIMITS.PASSWORD_MAX)
     .pattern(/^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&\-_#])/)
     .messages({
       'string.min': 'Minimum {#limit} characters',
@@ -81,12 +87,13 @@ const commonSchemas = {
     .messages({
       'string.alphanum': 'Only letters and numbers allowed',
       'string.min': 'Minimum 3 characters',
-      'string.max': 'Maximum 30 characters'
+      'string.max': 'Maximum 30 characters',
+      'string.empty': 'Username cannot be empty'
     }),
 
   pagination: Joi.object({
     page: Joi.number().integer().min(1).default(PAGINATION.DEFAULT_PAGE),
-    limit: Joi.number().integer().min(PAGINATION.MIN_LIMIT).max(PAGINATION.MAX_LIMIT).default(PAGINATION.DEFAULT_LIMIT),
+    limit: Joi.number().integer().min(1).max(PAGINATION.MAX_LIMIT).default(PAGINATION.DEFAULT_LIMIT),
     sort: Joi.string().trim(),
     order: Joi.string().valid('ASC', 'DESC').default('DESC')
   }),
@@ -127,7 +134,7 @@ const authSchemas = {
   register: Joi.object({
     email: commonSchemas.email.required(),
     password: commonSchemas.password.required(),
-    username: commonSchemas.username.optional(),
+    username: commonSchemas.username.allow('').optional(),
     full_name: Joi.string().min(2).max(100).trim().required()
       .messages({
         'string.min': 'Minimum 2 characters',
@@ -201,7 +208,7 @@ const authSchemas = {
 
 const userSchemas = {
   updateProfile: Joi.object({
-    username: commonSchemas.username.optional(),
+    username: commonSchemas.username.allow('').optional(),
     full_name: Joi.string().min(2).max(100).trim().allow(''),
     bio: Joi.string().max(500).allow('', null),
     location: Joi.string().max(100).allow('', null),
@@ -218,13 +225,28 @@ const userSchemas = {
     role: Joi.string().valid(...Object.values(USER_ROLES)).optional(),
     isActive: Joi.boolean().optional(),
     search: Joi.string().max(100).optional(),
-    orderBy: Joi.string().valid('created_at', 'email', 'username', 'full_name').default('created_at'),
+    orderBy: Joi.string().valid('created_at', 'email', 'username', 'full_name', 'activity').default('created_at'),
     order: Joi.string().valid('ASC', 'DESC').default('DESC')
   }),
 
   searchUsers: Joi.object({
     query: Joi.string().trim().min(1).max(100).required(),
     limit: Joi.number().integer().min(1).max(50).default(20)
+  }),
+
+  // Follow-related validation schemas
+  getUserFollowers: commonSchemas.pagination.keys({
+    orderBy: Joi.string().valid('created_at', 'username', 'full_name').default('created_at'),
+    order: Joi.string().valid('ASC', 'DESC').default('DESC')
+  }),
+
+  getUserFollowing: commonSchemas.pagination.keys({
+    orderBy: Joi.string().valid('created_at', 'username', 'full_name').default('created_at'),
+    order: Joi.string().valid('ASC', 'DESC').default('DESC')
+  }),
+
+  updateRole: Joi.object({
+    role: Joi.string().valid(...Object.values(USER_ROLES)).required()
   })
 };
 
@@ -234,48 +256,30 @@ const userSchemas = {
 
 const wordSchemas = {
   createWord: Joi.object({
-    english_word: Joi.string().trim().min(1).max(255).required(),
-    lisu_word: Joi.string().trim().min(1).max(255).required(),
-    english_definition: Joi.string().trim().max(2000).allow('', null),
-    lisu_definition: Joi.string().trim().max(2000).allow('', null),
+    english: Joi.string().trim().min(1).max(255).required(),
+    lisu: Joi.string().trim().min(1).max(255).required(),
     part_of_speech: Joi.string().valid(...PARTS_OF_SPEECH).optional(),
-    pronunciation_english: Joi.string().max(255).allow('', null),
-    pronunciation_lisu: Joi.string().max(255).allow('', null),
-    examples: Joi.array().items(Joi.string().max(500)).max(10).default([]),
-    tags: Joi.array().items(Joi.string().max(50)).max(10).default([]),
     meaning: Joi.string().max(1000).allow('', null),
-    phrase: Joi.string().max(500).allow('', null),
+    example: Joi.array().items(Joi.string().max(500)).max(10).default([]),
     synonyms: Joi.string().max(500).allow('', null),
-    antonyms: Joi.string().max(500).allow('', null),
-    etymology_origin: Joi.string().max(1000).allow('', null),
-    etymology_context: Joi.string().max(2000).allow('', null)
+    antonyms: Joi.string().max(500).allow('', null)
   }),
 
   updateWord: Joi.object({
-    english_word: Joi.string().trim().min(1).max(255),
-    lisu_word: Joi.string().trim().min(1).max(255),
-    english_definition: Joi.string().trim().max(2000).allow('', null),
-    lisu_definition: Joi.string().trim().max(2000).allow('', null),
+    english: Joi.string().trim().min(1).max(255),
+    lisu: Joi.string().trim().min(1).max(255),
     part_of_speech: Joi.string().valid(...PARTS_OF_SPEECH),
-    pronunciation_english: Joi.string().max(255).allow('', null),
-    pronunciation_lisu: Joi.string().max(255).allow('', null),
-    examples: Joi.array().items(Joi.string().max(500)).max(10),
-    tags: Joi.array().items(Joi.string().max(50)).max(10),
     meaning: Joi.string().max(1000).allow('', null),
-    phrase: Joi.string().max(500).allow('', null),
+    example: Joi.array().items(Joi.string().max(500)).max(10),
     synonyms: Joi.string().max(500).allow('', null),
-    antonyms: Joi.string().max(500).allow('', null),
-    etymology_origin: Joi.string().max(1000).allow('', null),
-    etymology_context: Joi.string().max(2000).allow('', null),
-    is_verified: Joi.boolean()
+    antonyms: Joi.string().max(500).allow('', null)
   }).min(1),
 
   listWords: commonSchemas.pagination.keys({
     search: Joi.string().max(100),
     part_of_speech: Joi.string().valid(...PARTS_OF_SPEECH),
-    is_verified: Joi.boolean(),
     created_by: commonSchemas.id,
-    sort: Joi.string().valid('created_at', 'updated_at', 'english_word', 'lisu_word').default('created_at')
+    sort: Joi.string().valid('created_at', 'updated_at', 'english', 'lisu').default('created_at')
   }),
 
   searchWords: Joi.object({
@@ -286,11 +290,71 @@ const wordSchemas = {
 
   bulkImport: Joi.object({
     words: Joi.array().items(Joi.object({
-      english_word: Joi.string().trim().min(1).max(255).required(),
-      lisu_word: Joi.string().trim().min(1).max(255).required(),
+      english: Joi.string().trim().min(1).max(255).required(),
+      lisu: Joi.string().trim().min(1).max(255).required(),
       part_of_speech: Joi.string().valid(...PARTS_OF_SPEECH).optional(),
-      english_definition: Joi.string().trim().max(2000).optional(),
-      pronunciation_english: Joi.string().max(255).optional()
+      meaning: Joi.string().max(1000).optional(),
+      example: Joi.string().max(1000).optional(),
+      synonyms: Joi.string().max(500).optional(),
+      antonyms: Joi.string().max(500).optional()
+    })).min(1).max(1000).required()
+  }),
+};
+
+// ============================================
+// Lisu Dictionary Schemas
+// ============================================
+
+const lisuSchemas = {
+  createLisu: Joi.object({
+    lisu_word: Joi.string().trim().min(1).max(255).required(),
+    english: Joi.string().trim().min(1).max(255).required(),
+    part_of_speech: Joi.string().valid(...PARTS_OF_SPEECH).optional(),
+    meaning: Joi.string().max(1000).allow('', null),
+    example: Joi.string().max(1000).allow('', null),
+    etymology: Joi.string().max(2000).allow('', null),
+    related_words: Joi.string().max(1000).allow('', null),
+    synonyms: Joi.string().max(500).allow('', null),
+    antonyms: Joi.string().max(500).allow('', null)
+  }).unknown(false),
+
+  updateLisu: Joi.object({
+    lisu_word: Joi.string().trim().min(1).max(255),
+    english: Joi.string().trim().min(1).max(255),
+    part_of_speech: Joi.string().valid(...PARTS_OF_SPEECH),
+    meaning: Joi.string().max(1000).allow('', null),
+    example: Joi.string().max(1000).allow('', null),
+    etymology: Joi.string().max(2000).allow('', null),
+    related_words: Joi.string().max(1000).allow('', null),
+    synonyms: Joi.string().max(500).allow('', null),
+    antonyms: Joi.string().max(500).allow('', null)
+  }).min(1),
+
+  listLisu: commonSchemas.pagination.keys({
+    search: Joi.string().max(100),
+    part_of_speech: Joi.string().valid(...PARTS_OF_SPEECH),
+    created_by: Joi.string().uuid(),
+    sort: Joi.string().valid('lisu_word', 'english', 'part_of_speech', 'created_at').default('created_at'),
+    order: Joi.string().valid('ASC', 'DESC').default('DESC')
+  }),
+
+  searchLisu: Joi.object({
+    query: Joi.string().trim().min(1).max(100).required(),
+    language: Joi.string().valid('lisu', 'english', 'both').default('both'),
+    limit: Joi.number().integer().min(1).max(100).default(20)
+  }),
+
+  bulkImportLisu: Joi.object({
+    words: Joi.array().items(Joi.object({
+      lisu_word: Joi.string().trim().min(1).max(255).required(),
+      english: Joi.string().trim().min(1).max(255).required(),
+      part_of_speech: Joi.string().valid(...PARTS_OF_SPEECH).optional(),
+      meaning: Joi.string().max(1000).optional(),
+      example: Joi.string().max(1000).optional(),
+      etymology: Joi.string().max(2000).optional(),
+      related_words: Joi.string().max(1000).optional(),
+      synonyms: Joi.string().max(500).optional(),
+      antonyms: Joi.string().max(500).optional()
     })).min(1).max(1000).required()
   })
 };
@@ -301,28 +365,28 @@ const wordSchemas = {
 
 const discussionSchemas = {
   createDiscussion: Joi.object({
-    title: Joi.string().min(DISCUSSION.TITLE_MIN_LENGTH).max(DISCUSSION.TITLE_MAX_LENGTH).trim().required(),
-    content: Joi.string().min(DISCUSSION.CONTENT_MIN_LENGTH).max(DISCUSSION.CONTENT_MAX_LENGTH).trim().required(),
-    tags: Joi.array().items(Joi.string().max(50)).max(DISCUSSION.MAX_TAGS).default([]),
+    title: Joi.string().min(CONTENT_LIMITS.DISCUSSION_TITLE_MIN).max(CONTENT_LIMITS.DISCUSSION_TITLE_MAX).trim().required(),
+    content: Joi.string().min(CONTENT_LIMITS.DISCUSSION_CONTENT_MIN).max(CONTENT_LIMITS.DISCUSSION_CONTENT_MAX).trim().required(),
+    tags: Joi.array().items(Joi.string().max(50)).max(10).default([]),
     category: Joi.string().max(50).optional()
   }),
 
   updateDiscussion: Joi.object({
-    title: Joi.string().min(DISCUSSION.TITLE_MIN_LENGTH).max(DISCUSSION.TITLE_MAX_LENGTH).trim(),
-    content: Joi.string().min(DISCUSSION.CONTENT_MIN_LENGTH).max(DISCUSSION.CONTENT_MAX_LENGTH).trim(),
-    tags: Joi.array().items(Joi.string().max(50)).max(DISCUSSION.MAX_TAGS),
+    title: Joi.string().min(CONTENT_LIMITS.DISCUSSION_TITLE_MIN).max(CONTENT_LIMITS.DISCUSSION_TITLE_MAX).trim(),
+    content: Joi.string().min(CONTENT_LIMITS.DISCUSSION_CONTENT_MIN).max(CONTENT_LIMITS.DISCUSSION_CONTENT_MAX).trim(),
+    tags: Joi.array().items(Joi.string().max(50)).max(10),
     category: Joi.string().max(50)
   }).min(1),
 
   createAnswer: Joi.object({
-    content: Joi.string().min(10).max(DISCUSSION.CONTENT_MAX_LENGTH).trim().required(),
+    content: Joi.string().min(10).max(CONTENT_LIMITS.ANSWER_CONTENT_MAX).trim().required(),
     discussion_id: commonSchemas.id.required(),
     parent_answer_id: commonSchemas.id.allow(null).optional(),
     images: Joi.array().items(Joi.string()).optional()
   }),
 
   updateAnswer: Joi.object({
-    content: Joi.string().min(10).max(DISCUSSION.CONTENT_MAX_LENGTH).trim().required()
+    content: Joi.string().min(10).max(CONTENT_LIMITS.ANSWER_CONTENT_MAX).trim().required()
   }),
 
   listDiscussions: commonSchemas.pagination.keys({
@@ -330,8 +394,8 @@ const discussionSchemas = {
     tag: Joi.string().max(50),
     author_id: commonSchemas.id,
     search: Joi.string().max(100),
-    sort: Joi.string().valid('created_at', 'updated_at', 'title', 'views', 'recent', 'latest', 'popular', 'newest', 'oldest', 'active').default('recent'),
-    sortBy: Joi.string().valid('created_at', 'updated_at', 'title', 'views', 'recent', 'latest', 'popular', 'newest', 'oldest', 'active').default('recent')
+    sort: Joi.string().valid('latest', 'recent', 'popular', 'views', 'newest').default('latest'),
+    sortBy: Joi.string().valid('latest', 'recent', 'popular', 'views', 'newest').default('latest')
   }),
 
   vote: Joi.object({
@@ -396,7 +460,6 @@ const searchSchemas = {
     filters: Joi.object({
       part_of_speech: Joi.array().items(Joi.string().valid(...PARTS_OF_SPEECH)),
       is_verified: Joi.boolean(),
-      has_etymology: Joi.boolean(),
       created_after: Joi.date(),
       created_before: Joi.date()
     }).optional(),
@@ -546,12 +609,13 @@ const adminSchemas = {
 
   bulkImport: Joi.object({
     words: Joi.array().items(Joi.object({
-      lisu_word: Joi.string().trim().min(1).max(100).required(),
-      english_translation: Joi.string().trim().min(1).max(500).required(),
-      part_of_speech: Joi.string().valid(...PARTS_OF_SPEECH).required(),
-      pronunciation: Joi.string().trim().max(200).optional(),
-      example_sentence: Joi.string().trim().max(1000).optional(),
-      notes: Joi.string().trim().max(1000).optional()
+      english: Joi.string().trim().min(1).max(255).required(),
+      lisu: Joi.string().trim().min(1).max(255).required(),
+      part_of_speech: Joi.string().valid(...PARTS_OF_SPEECH).optional(),
+      meaning: Joi.string().max(1000).optional(),
+      example: Joi.string().max(1000).optional(),
+      synonyms: Joi.string().max(500).optional(),
+      antonyms: Joi.string().max(500).optional()
     })).min(1).max(1000).required()
   }),
 
@@ -685,6 +749,7 @@ module.exports = {
     auth: authSchemas,
     user: userSchemas,
     word: wordSchemas,
+    lisu: lisuSchemas,
     discussion: discussionSchemas,
     search: searchSchemas,
     chat: chatSchemas,

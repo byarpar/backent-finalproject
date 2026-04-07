@@ -150,26 +150,6 @@ class DatabaseInitializer {
         )
       `);
 
-      // Create words table
-      await client.query(`
-        CREATE TABLE words (
-          id SERIAL PRIMARY KEY,
-          english_word VARCHAR(255) NOT NULL,
-          lisu_word VARCHAR(255) NOT NULL,
-          english_definition TEXT,
-          lisu_definition TEXT,
-          part_of_speech VARCHAR(50),
-          pronunciation_english VARCHAR(255),
-          pronunciation_lisu VARCHAR(255),
-          examples JSONB DEFAULT '[]',
-          tags JSONB DEFAULT '[]',
-          is_verified BOOLEAN DEFAULT false,
-          created_by UUID REFERENCES users(id),
-          created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-          updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
-        )
-      `);
-
       // Create discussions table
       await client.query(`
         CREATE TABLE discussions (
@@ -178,8 +158,15 @@ class DatabaseInitializer {
           content TEXT NOT NULL,
           category VARCHAR(50) DEFAULT 'general',
           author_id UUID REFERENCES users(id),
+          tags TEXT[] DEFAULT '{}',
+          images JSONB,
           is_pinned BOOLEAN DEFAULT false,
           is_locked BOOLEAN DEFAULT false,
+          vote_count INTEGER DEFAULT 0,
+          upvotes INTEGER DEFAULT 0,
+          downvotes INTEGER DEFAULT 0,
+          views_count INTEGER DEFAULT 0,
+          answers_count INTEGER DEFAULT 0,
           last_activity TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
           created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
           updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
@@ -194,18 +181,6 @@ class DatabaseInitializer {
           word_id INTEGER REFERENCES words(id) ON DELETE CASCADE,
           created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
           UNIQUE(user_id, word_id)
-        )
-      `);
-
-      // Create search history table
-      await client.query(`
-        CREATE TABLE search_history (
-          id SERIAL PRIMARY KEY,
-          user_id UUID REFERENCES users(id),
-          search_query VARCHAR(500) NOT NULL,
-          language VARCHAR(20) DEFAULT 'auto',
-          results_count INTEGER DEFAULT 0,
-          created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
         )
       `);
 
@@ -244,11 +219,11 @@ class DatabaseInitializer {
       'CREATE INDEX idx_users_role ON users(role)',
       'CREATE INDEX idx_users_active ON users(is_active)',
 
-      'CREATE INDEX idx_words_english ON words USING gin(to_tsvector(\'english\', english_word))',
-      'CREATE INDEX idx_words_lisu ON words USING gin(to_tsvector(\'english\', lisu_word))',
-      'CREATE INDEX idx_words_definition ON words USING gin(to_tsvector(\'english\', english_definition))',
-      'CREATE INDEX idx_words_created_at ON words(created_at)',
+      'CREATE INDEX idx_words_english ON words USING gin(to_tsvector(\'english\', english))',
+      'CREATE INDEX idx_words_lisu ON words USING gin(to_tsvector(\'english\', lisu))',
+      'CREATE INDEX idx_words_part_of_speech ON words(part_of_speech)',
       'CREATE INDEX idx_words_created_by ON words(created_by)',
+      'CREATE INDEX idx_words_created_at ON words(created_at)',
 
       'CREATE INDEX idx_word_categories_name ON word_categories(name)',
       'CREATE INDEX idx_word_category_mappings_word ON word_category_mappings(word_id)',

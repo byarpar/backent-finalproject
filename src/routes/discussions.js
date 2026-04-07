@@ -2,7 +2,7 @@ const express = require('express');
 const multer = require('multer');
 const path = require('path');
 const DiscussionController = require('../controllers/discussionController');
-const { authenticate, optionalAuthenticate } = require('../middlewares/auth');
+const { authenticate, optionalAuth } = require('../middlewares');
 const { validate, schemas } = require('../validations/schemas');
 
 const router = express.Router();
@@ -47,7 +47,7 @@ const upload = multer({
  * @access  Public (with optional auth for personalization)
  */
 router.get('/',
-  optionalAuthenticate,
+  optionalAuth,
   validate(schemas.discussion.listDiscussions, 'query'),
   DiscussionController.getAllDiscussions
 );
@@ -81,7 +81,7 @@ router.get('/user/saved',
  * @access  Public (with optional auth)
  */
 router.get('/:id/related',
-  optionalAuthenticate,
+  optionalAuth,
   validate(schemas.common.params.id, 'params'),
   DiscussionController.getRelatedDiscussions
 );
@@ -92,7 +92,7 @@ router.get('/:id/related',
  * @access  Public (with optional auth)
  */
 router.get('/:id',
-  optionalAuthenticate,
+  optionalAuth,
   validate(schemas.common.params.id, 'params'),
   DiscussionController.getDiscussionById
 );

@@ -1,6 +1,6 @@
 const express = require('express');
 const AnswerController = require('../controllers/answerController');
-const { authenticate, optionalAuthenticate } = require('../middlewares/auth');
+const { authenticate, optionalAuth } = require('../middlewares');
 const { validate, schemas } = require('../validations/schemas');
 
 const router = express.Router();
@@ -15,7 +15,7 @@ const router = express.Router();
  * @access  Public (with optional auth)
  */
 router.get('/discussion/:discussionId',
-  optionalAuthenticate,
+  optionalAuth,
   validate(schemas.answer.getByDiscussion, 'params'),
   validate(schemas.answer.listAnswers, 'query'),
   AnswerController.getAnswersForDiscussion

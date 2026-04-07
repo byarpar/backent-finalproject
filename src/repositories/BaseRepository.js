@@ -12,7 +12,7 @@
  */
 
 const { db } = require('../config/database');
-const { DatabaseError, NotFoundError } = require('../utils/errors');
+const { DatabaseError, NotFoundError } = require('../utils');
 const logger = require('../utils/logger');
 
 class BaseRepository {
@@ -268,15 +268,22 @@ class BaseRepository {
       offset
     });
 
+    const totalPages = Math.ceil(totalCount / limit);
+
     return {
       data,
       pagination: {
         page,
         limit,
         total: totalCount,
-        total_pages: Math.ceil(totalCount / limit),
-        has_next: page < Math.ceil(totalCount / limit),
-        has_prev: page > 1
+        totalPages,
+        total_pages: totalPages, // Legacy support
+        hasNext: page < totalPages,
+        has_next: page < totalPages, // Legacy support
+        hasPrev: page > 1,
+        has_prev: page > 1, // Legacy support
+        nextPage: page < totalPages ? page + 1 : null,
+        prevPage: page > 1 ? page - 1 : null
       }
     };
   }
@@ -325,6 +332,60 @@ class BaseRepository {
    */
   async raw(query, params = [], client = null) {
     return await this.query(query, params, client);
+  }
+
+  /**
+   * Common voting logic for discussions and answers
+   * @param {string} tableName - Name of the votes table (e.g., 'discussion_votes', 'answer_votes')
+   * @param {string} itemIdColumn - Name of the item ID column (e.g., 'discussion_id', 'answer_id')
+   * @param {string|number} itemId - ID of the item being voted on
+   * @param {string} userId - ID of the user voting
+   * @param {string} voteType - Type of vote ('up' or 'down')
+   * @param {Function} getUserVoteMethod - Method to get existing user vote
+   * @returns {Promise<Object>} Vote result with action and voteType
+   */
+  async _handleVote(tableName, itemIdColumn, itemId, userId, voteType, getUserVoteMethod) {
+    try {
+      const existingVote = await getUserVoteMethod(itemId, userId);
+
+      let action, resultVoteType;
+
+      if (existingVote) {
+        if (existingVote === voteType) {
+          // Remove vote (toggle off)
+          await this.db.query(
+            `DELETE FROM ${tableName} WHERE ${itemIdColumn} = $1 AND user_id = $2`,
+            [itemId, userId]
+          );
+          action = 'removed';
+          resultVoteType = null;
+          logger.info('Vote removed', { tableName, itemId, userId, voteType });
+        } else {
+          // Update vote
+          await this.db.query(
+            `UPDATE ${tableName} SET vote_type = $1, updated_at = CURRENT_TIMESTAMP WHERE ${itemIdColumn} = $2 AND user_id = $3`,
+            [voteType, itemId, userId]
+          );
+          action = 'updated';
+          resultVoteType = voteType;
+          logger.info('Vote updated', { tableName, itemId, userId, voteType });
+        }
+      } else {
+        // Create new vote
+        await this.db.query(
+          `INSERT INTO ${tableName} (${itemIdColumn}, user_id, vote_type) VALUES ($1, $2, $3)`,
+          [itemId, userId, voteType]
+        );
+        action = 'created';
+        resultVoteType = voteType;
+        logger.info('Vote created', { tableName, itemId, userId, voteType });
+      }
+
+      return { action, voteType: resultVoteType };
+    } catch (error) {
+      logger.error('Error handling vote', { tableName, itemId, userId, voteType, error: error.message });
+      throw error;
+    }
   }
 }
 

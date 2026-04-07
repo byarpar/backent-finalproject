@@ -1,6 +1,6 @@
 const passport = require('passport');
 const GoogleStrategy = require('passport-google-oauth20').Strategy;
-const User = require('../models/User');
+const userRepository = require('../repositories/UserRepository');
 const logger = require('../utils/logger');
 
 // Serialize user for session
@@ -11,7 +11,7 @@ passport.serializeUser((user, done) => {
 // Deserialize user from session
 passport.deserializeUser(async (id, done) => {
   try {
-    const user = await User.findById(id);
+    const user = await userRepository.findById(id);
     done(null, user);
   } catch (error) {
     done(error, null);
@@ -49,7 +49,7 @@ if (process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET) {
           }
 
           // Check if this Google account was deleted
-          const deletedGoogleUser = await User.findDeletedByGoogleId(googleId);
+          const deletedGoogleUser = await userRepository.findDeletedByGoogleId(googleId);
           if (deletedGoogleUser) {
             const GRACE_PERIOD_DAYS = 30;
             const GRACE_PERIOD_MS = GRACE_PERIOD_DAYS * 24 * 60 * 60 * 1000;
@@ -76,7 +76,7 @@ if (process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET) {
           }
 
           // Check if this email was deleted (from regular account)
-          const deletedEmailUser = await User.findDeletedByEmail(email);
+          const deletedEmailUser = await userRepository.findDeletedByEmail(email);
           if (deletedEmailUser) {
             const GRACE_PERIOD_DAYS = 30;
             const GRACE_PERIOD_MS = GRACE_PERIOD_DAYS * 24 * 60 * 60 * 1000;
@@ -102,7 +102,7 @@ if (process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET) {
           }
 
           // Check if user exists with this Google ID
-          let user = await User.findByGoogleId(googleId);
+          let user = await userRepository.findByGoogleId(googleId);
 
           if (user) {
             // User exists with this Google ID
@@ -111,13 +111,13 @@ if (process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET) {
               user.profile_photo_url.includes('googleusercontent.com');
 
             if (shouldUpdatePhoto && profilePhoto && user.profile_photo_url !== profilePhoto) {
-              user = await User.update(user.id, {
+              user = await userRepository.update(user.id, {
                 profile_photo_url: profilePhoto,
                 last_login: new Date()
               });
             } else {
               // Just update last login, keep existing profile photo
-              await User.update(user.id, { last_login: new Date() });
+              await userRepository.update(user.id, { last_login: new Date() });
             }
 
             logger.info('Existing Google user logged in', {
@@ -129,14 +129,14 @@ if (process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET) {
           }
 
           // Check if user exists with this email (from regular registration)
-          user = await User.findByEmail(email);
+          user = await userRepository.findByEmail(email);
 
           if (user) {
             // User exists with email - link Google account
             // Only use Google photo if user doesn't have a profile photo yet
             const updatedProfilePhoto = user.profile_photo_url || profilePhoto;
 
-            user = await User.update(user.id, {
+            user = await userRepository.update(user.id, {
               google_id: googleId,
               oauth_provider: 'google',
               profile_photo_url: updatedProfilePhoto,
@@ -154,7 +154,7 @@ if (process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET) {
           }
 
           // New user - create account
-          const newUser = await User.create({
+          const newUser = await userRepository.create({
             email,
             password: null, // OAuth users don't have passwords
             username: email.split('@')[0] + '_' + Math.random().toString(36).substring(7), // Generate unique username

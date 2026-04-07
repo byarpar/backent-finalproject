@@ -5,7 +5,7 @@
 
 const UserRepository = require('../repositories/UserRepository');
 const logger = require('../utils/logger');
-const { NotFoundError, ValidationError, ConflictError } = require('../utils/errors');
+const { NotFoundError, ValidationError, ConflictError } = require('../utils');
 const { maskEmail } = require('../utils/helpers');
 
 class UserService {
@@ -141,7 +141,13 @@ class UserService {
         discussionsStarted,
         answersPosted,
         favoritesCount: parseInt(stats.favorites_count || 0),
+        savedDiscussionsCount: parseInt(stats.saved_discussions_count || 0),
         reputation,
+        // Voting statistics
+        upvotedDiscussions: parseInt(stats.upvoted_discussions || 0),
+        downvotedDiscussions: parseInt(stats.downvoted_discussions || 0),
+        upvotedAnswers: parseInt(stats.upvoted_answers || 0),
+        downvotedAnswers: parseInt(stats.downvoted_answers || 0),
         // Additional stats for badges
         total_discussions: discussionsStarted,
         total_messages: answersPosted,
@@ -193,14 +199,6 @@ class UserService {
   }
 
   /**
-   * List users (admin)
-   */
-  async listUsers(options = {}) {
-    const result = await UserRepository.list(options);
-    return result;
-  }
-
-  /**
    * Deactivate user account
    */
   async deactivateAccount(userId) {
@@ -236,17 +234,7 @@ class UserService {
     return true;
   }
 
-  /**
-   * Update user role (admin)
-   */
-  async updateUserRole(userId, newRole) {
-    await this.getUserById(userId);
 
-    const updatedUser = await UserRepository.update(userId, { role: newRole });
-
-    logger.info('User role updated', { userId, newRole });
-    return updatedUser;
-  }
 
   /**
    * Get user's favorite words
@@ -317,6 +305,24 @@ class UserService {
   }
 
   /**
+   * Update user role (admin function)
+   */
+  async updateUserRole(userId, newRole, adminId) {
+    const user = await this.getUserById(userId);
+
+    // Prevent changing your own role
+    if (userId === adminId) {
+      throw new ValidationError('Cannot change your own role');
+    }
+
+    const updated = await UserRepository.update(userId, { role: newRole });
+
+    logger.info('User role updated', { userId, newRole, adminId });
+
+    return updated;
+  }
+
+  /**
    * Delete user (admin function - soft delete)
    */
   async deleteUser(userId, adminId) {
@@ -332,6 +338,219 @@ class UserService {
     logger.info('User deleted', { userId, adminId });
 
     return { success: true, message: 'User deleted successfully' };
+  }
+
+  /**
+   * Get user suggestions for mentions
+   */
+  async getMentionSuggestions(searchTerm, limit = 10) {
+    if (!searchTerm || searchTerm.length < 2) {
+      return { users: [] };
+    }
+
+    try {
+      // Search for users by username and full name
+      const users = await UserRepository.searchUsersForMentions(searchTerm, limit);
+
+      // Return simplified format for mentions
+      const suggestions = users.map(user => ({
+        id: user.id,
+        username: user.username,
+        full_name: user.full_name,
+        profile_photo_url: user.profile_photo_url,
+        display_name: user.full_name || user.username
+      }));
+
+      return { users: suggestions };
+    } catch (error) {
+      logger.error('Error getting mention suggestions', {
+        searchTerm,
+        error: error.message
+      });
+      return { users: [] };
+    }
+  }
+
+  /**
+   * Get user by username
+   */
+  async getUserByUsername(username) {
+    try {
+      const user = await UserRepository.findByUsername(username);
+      return user;
+    } catch (error) {
+      logger.error('Error getting user by username', {
+        username,
+        error: error.message
+      });
+      return null;
+    }
+  }
+
+  /**
+   * Get multiple user UUIDs by usernames
+   */
+  async getUserUUIDsByUsernames(usernames) {
+    try {
+      const users = await UserRepository.findByUsernames(usernames);
+
+      // Create a map of username -> UUID
+      const userMap = {};
+      users.forEach(user => {
+        if (user.username) {
+          userMap[user.username] = user.id;
+        }
+      });
+
+      return userMap;
+    } catch (error) {
+      logger.error('Error getting user UUIDs by usernames', {
+        usernames,
+        error: error.message
+      });
+      return {};
+    }
+  }
+
+  /**
+   * Follow a user
+   */
+  async followUser(followerId, followingId) {
+    if (followerId === followingId) {
+      throw new ValidationError('Cannot follow yourself');
+    }
+
+    // Check if users exist
+    await this.getUserById(followerId);
+    await this.getUserById(followingId);
+
+    try {
+      // Check if already following
+      const existingFollow = await UserRepository.findFollow(followerId, followingId);
+      if (existingFollow) {
+        throw new ConflictError('Already following this user');
+      }
+
+      // Create follow relationship
+      const follow = await UserRepository.createFollow(followerId, followingId);
+
+      // Notifications have been removed
+      logger.info('Follow relationship created (notifications disabled)', { followerId, followingId });
+
+      logger.info('User follow created', { followerId, followingId });
+      return follow;
+    } catch (error) {
+      if (error instanceof ConflictError || error instanceof ValidationError) {
+        throw error;
+      }
+      logger.error('Error creating follow relationship', {
+        followerId,
+        followingId,
+        error: error.message
+      });
+      throw error;
+    }
+  }
+
+  /**
+   * Unfollow a user
+   */
+  async unfollowUser(followerId, followingId) {
+    if (followerId === followingId) {
+      throw new ValidationError('Cannot unfollow yourself');
+    }
+
+    try {
+      // Check if currently following
+      const existingFollow = await UserRepository.findFollow(followerId, followingId);
+      if (!existingFollow) {
+        throw new NotFoundError('Not following this user');
+      }
+
+      // Remove follow relationship
+      await UserRepository.deleteFollow(followerId, followingId);
+
+      logger.info('User unfollow completed', { followerId, followingId });
+      return { success: true };
+    } catch (error) {
+      if (error instanceof NotFoundError || error instanceof ValidationError) {
+        throw error;
+      }
+      logger.error('Error removing follow relationship', {
+        followerId,
+        followingId,
+        error: error.message
+      });
+      throw error;
+    }
+  }
+
+  /**
+   * Get follow information for a user
+   */
+  async getFollowInfo(userId, currentUserId = null) {
+    try {
+      await this.getUserById(userId);
+
+      const [followersCount, followingCount, isFollowing] = await Promise.all([
+        UserRepository.getFollowersCount(userId),
+        UserRepository.getFollowingCount(userId),
+        currentUserId ? UserRepository.findFollow(currentUserId, userId) : null
+      ]);
+
+      return {
+        followersCount: followersCount || 0,
+        followingCount: followingCount || 0,
+        isFollowing: !!isFollowing
+      };
+    } catch (error) {
+      logger.error('Error getting follow info', {
+        userId,
+        currentUserId,
+        error: error.message
+      });
+      throw error;
+    }
+  }
+
+  /**
+   * Get user's followers
+   */
+  async getUserFollowers(userId, options = {}) {
+    const { limit = 50, offset = 0 } = options;
+
+    try {
+      await this.getUserById(userId);
+      const followers = await UserRepository.getFollowers(userId, { limit, offset });
+
+      return followers;
+    } catch (error) {
+      logger.error('Error getting user followers', {
+        userId,
+        error: error.message
+      });
+      throw error;
+    }
+  }
+
+  /**
+   * Get users that a user is following
+   */
+  async getUserFollowing(userId, options = {}) {
+    const { limit = 50, offset = 0 } = options;
+
+    try {
+      await this.getUserById(userId);
+      const following = await UserRepository.getFollowing(userId, { limit, offset });
+
+      return following;
+    } catch (error) {
+      logger.error('Error getting user following', {
+        userId,
+        error: error.message
+      });
+      throw error;
+    }
   }
 }
 

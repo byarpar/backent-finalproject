@@ -1,8 +1,8 @@
 const { Pool } = require('pg');
 const DatabaseInitializer = require('./databaseInitializer');
 const logger = require('../utils/logger');
-const config = require('./env');
-const { DatabaseError } = require('../utils/errors');
+const { env, dbConfig } = require('./index');
+const { DatabaseError } = require('../utils');
 
 /**
  * Professional Database Manager with Connection Pooling and Advanced Features
@@ -38,17 +38,17 @@ class DatabaseManager {
 
     // Optimized connection configuration from environment
     this.connectionConfig = {
-      host: config.database.host,
-      port: config.database.port,
-      database: config.database.name,
-      user: config.database.user,
-      password: config.database.password,
+      host: dbConfig.host || env.DB_HOST,
+      port: dbConfig.port || env.DB_PORT,
+      database: dbConfig.database || env.DB_NAME,
+      user: dbConfig.user || env.DB_USER,
+      password: dbConfig.password || env.DB_PASSWORD,
 
       // High-performance pool settings
-      max: config.database.pool.max,
-      min: config.database.pool.min,
-      idleTimeoutMillis: config.database.pool.idleTimeout,
-      connectionTimeoutMillis: config.database.pool.connectionTimeout,
+      max: dbConfig.max || 10,
+      min: dbConfig.min || 2,
+      idleTimeoutMillis: dbConfig.idleTimeoutMillis || 30000,
+      connectionTimeoutMillis: dbConfig.connectionTimeoutMillis || 2000,
       acquireTimeoutMillis: 30000,
 
       // Performance optimizations
@@ -61,7 +61,7 @@ class DatabaseManager {
       statement_timeout: 30000,
 
       // SSL Configuration
-      ssl: config.database.ssl ? { rejectUnauthorized: false } : false
+      ssl: dbConfig.ssl || (env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false)
     };
 
     // Prepared statements cache
@@ -104,8 +104,10 @@ class DatabaseManager {
       });
 
       // Initialize database schema and sample data
+      logger.info('Starting database schema initialization...');
       const initializer = new DatabaseInitializer(this.pool);
       await initializer.initialize();
+      logger.info('Database schema initialization completed');
 
       this.isConnected = true;
       return this.pool;
@@ -226,7 +228,7 @@ class DatabaseManager {
       this._updateMetrics(queryTime, true);
 
       // Log slow queries
-      const slowThreshold = config.monitoring.slowQueryThreshold;
+      const slowThreshold = env.SLOW_QUERY_THRESHOLD || 1000; // 1 second default
       if (queryTime > slowThreshold) {
         this.metrics.slowQueries++;
         logger.warn('Slow query detected', {

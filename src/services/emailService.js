@@ -147,11 +147,11 @@ class EmailService {
 
       const mailOptions = {
         from: {
-          name: 'Lisu Dictionary',
+          name: 'DevForum',
           address: process.env.EMAIL_FROM || process.env.EMAIL_USER
         },
         to: email,
-        subject: 'Verify Your Email - Lisu Dictionary',
+        subject: 'Verify Your Email - DevForum',
         html: this.getVerificationEmailTemplate(code),
         text: this.getVerificationEmailText(code)
       };
@@ -217,7 +217,7 @@ class EmailService {
           <tr>
             <td style="padding: 40px;">
               <p style="margin: 0 0 20px; color: #374151; font-size: 16px; line-height: 1.5;">
-                Thank you for registering with <strong>Lisu Dictionary</strong>! To complete your registration and access all features, please verify your email address.
+                Thank you for registering with <strong>DevForum</strong>! To complete your registration and access all features, please verify your email address.
               </p>
 
               <p style="margin: 0 0 30px; color: #374151; font-size: 16px; line-height: 1.5;">
@@ -255,8 +255,8 @@ class EmailService {
           <tr>
             <td style="padding: 30px 40px; background-color: #f9fafb; border-radius: 0 0 8px 8px; text-align: center;">
               <p style="margin: 0 0 10px; color: #6b7280; font-size: 14px;">
-                <strong>Lisu Dictionary</strong><br>
-                Preserving and promoting the Lisu language
+                <strong>DevForum</strong><br>
+                Connecting developers worldwide
               </p>
               <p style="margin: 0; color: #9ca3af; font-size: 12px;">
                 This is an automated email. Please do not reply to this message.
@@ -313,11 +313,11 @@ Preserving and promoting the Lisu language
 
     const mailOptions = {
       from: {
-        name: 'Lisu Dictionary',
+        name: 'DevForum',
         address: process.env.EMAIL_FROM || process.env.EMAIL_USER
       },
       to: email,
-      subject: 'Reset Your Password - Lisu Dictionary',
+      subject: 'Reset Your Password - DevForum',
       html: `
         <h2>Password Reset Request</h2>
         <p>You requested to reset your password. Click the link below to reset it:</p>

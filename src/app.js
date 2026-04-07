@@ -8,22 +8,18 @@ const session = require('express-session');
 
 const logger = require('./utils/logger');
 const { db } = require('./config/database');
-const { formatError } = require('./utils/helpers');
-const { errorHandler, notFoundHandler } = require('./middlewares/errorHandler');
+const formatError = (error) => ({ message: error.message || 'An error occurred', code: error.code || 'UNKNOWN_ERROR' });
+const { errorHandler, notFoundHandler } = require('./middlewares');
 
 // Initialize passport configuration
 require('./config/passport');
 
 // Import routes
 const authRoutes = require('./routes/auth');
-const wordRoutes = require('./routes/words');
-const searchRoutes = require('./routes/search');
 const adminRoutes = require('./routes/admin');
 const discussionRoutes = require('./routes/discussions');
 const answerRoutes = require('./routes/answers');
-const tagsRoutes = require('./routes/tags');
 const userRoutes = require('./routes/users');
-const chatRoutes = require('./routes/chat');
 
 // Create Express application
 const app = express();
@@ -90,16 +86,32 @@ app.get('/health', (req, res) => {
   });
 });
 
+// Root endpoint
+app.get('/', (req, res) => {
+  res.json({
+    success: true,
+    message: 'DevForum API',
+    data: {
+      name: 'DevForum Backend',
+      version: process.env.npm_package_version || '1.0.0',
+      timestamp: new Date().toISOString(),
+      endpoints: {
+        health: '/health',
+        auth: '/api/auth',
+        discussions: '/api/discussions',
+        answers: '/api/answers',
+        admin: '/api/admin'
+      }
+    }
+  });
+});
+
 // API Routes
 app.use('/api/auth', authRoutes);
-app.use('/api/words', wordRoutes);
-app.use('/api/search', searchRoutes);
 app.use('/api/admin', adminRoutes);
 app.use('/api/discussions', discussionRoutes);
 app.use('/api/answers', answerRoutes);
-app.use('/api/tags', tagsRoutes);
 app.use('/api/users', userRoutes);
-app.use('/api/chat', chatRoutes);
 
 // Serve uploaded images statically
 app.use('/uploads', express.static(path.join(__dirname, '../uploads')));
@@ -123,6 +135,7 @@ app.use(errorHandler);
 const initializeApp = async () => {
   try {
     logger.info('Initializing application...');
+    logger.info('Starting database initialization...');
 
     // Initialize database connection
     await db.initialize();
@@ -132,6 +145,7 @@ const initializeApp = async () => {
     return true;
   } catch (error) {
     logger.error('Failed to initialize application:', error);
+    logger.error('Error details:', error.stack);
     throw error;
   }
 };

@@ -1,19 +1,8 @@
 const express = require('express');
 const router = express.Router();
 const UserController = require('../controllers/userController');
-const { authenticate, authorize, requireMinRole } = require('../middlewares/auth');
+const { authenticate, authorize } = require('../middlewares');
 const { validate, schemas } = require('../validations/schemas');
-
-// Import notification routes
-const notificationRoutes = require('./notifications');
-
-// ============================================
-// Nested Routes
-// ============================================
-
-// IMPORTANT: Notifications routes must come BEFORE :userId routes
-// to prevent "notifications" from being interpreted as a userId
-router.use('/notifications', notificationRoutes);
 
 // ============================================
 // Public Routes
@@ -38,6 +27,35 @@ router.get('/search',
   validate(schemas.user.searchUsers, 'query'),
   UserController.searchUsers
 );
+
+/**
+ * @route   GET /api/users/mention-suggestions
+ * @desc    Get user suggestions for mentions
+ * @access  Public
+ */
+router.get('/mention-suggestions',
+  UserController.getMentionSuggestions
+);
+
+/**
+ * @route   POST /api/users/lookup
+ * @desc    Get multiple user UUIDs by usernames
+ * @access  Public
+ */
+// TEMPORARILY DISABLED - missing method
+// router.post('/lookup',
+//   UserController.getUserUUIDsByUsernames
+// );
+
+/**
+ * @route   GET /api/users/lookup/:username
+ * @desc    Get user UUID by username
+ * @access  Public
+ */
+// TEMPORARILY DISABLED - missing method  
+// router.get('/lookup/:username',
+//   UserController.getUserUUIDByUsername
+// );
 
 // ============================================
 // Protected Routes - Authentication Required
@@ -75,6 +93,70 @@ router.delete('/me/account',
   authenticate,
   UserController.deleteAccount
 );
+
+// ============================================
+// Follow System Routes - Authentication Required
+// ============================================
+
+/**
+ * @route   POST /api/users/:userId/follow
+ * @desc    Follow a user
+ * @access  Private
+ */
+// TEMPORARILY DISABLED - missing method
+// router.post('/:userId/follow',
+//   authenticate,
+//   validate(schemas.common.params.userId, 'params'),
+//   UserController.followUser
+// );
+
+/**
+ * @route   DELETE /api/users/:userId/follow
+ * @desc    Unfollow a user
+ * @access  Private
+ */
+// TEMPORARILY DISABLED - missing method
+// router.delete('/:userId/follow',
+//   authenticate,
+//   validate(schemas.common.params.userId, 'params'),
+//   UserController.unfollowUser
+// );
+
+/**
+ * @route   GET /api/users/:userId/follow-info
+ * @desc    Get follow information for a user
+ * @access  Private
+ */
+// TEMPORARILY DISABLED - missing method
+// router.get('/:userId/follow-info',
+//   authenticate,
+//   validate(schemas.common.params.userId, 'params'),
+//   UserController.getFollowInfo
+// );
+
+/**
+ * @route   GET /api/users/:userId/followers
+ * @desc    Get user's followers list
+ * @access  Public
+ */
+// TEMPORARILY DISABLED - missing method
+// router.get('/:userId/followers',
+//   validate(schemas.common.params.userId, 'params'),
+//   validate(schemas.user.getUserFollowers, 'query'),
+//   UserController.getUserFollowers
+// );
+
+/**
+ * @route   GET /api/users/:userId/following
+ * @desc    Get user's following list
+ * @access  Public
+ */
+// TEMPORARILY DISABLED - missing method
+// router.get('/:userId/following',
+//   validate(schemas.common.params.userId, 'params'),
+//   validate(schemas.user.getUserFollowing, 'query'),
+//   UserController.getUserFollowing
+// );
 
 // ============================================
 // Public Routes with Dynamic Parameters

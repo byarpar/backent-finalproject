@@ -5,7 +5,8 @@
 
 const AnswerRepository = require('../repositories/AnswerRepository');
 const UserRepository = require('../repositories/UserRepository');
-const { NotFoundError, ValidationError, ForbiddenError } = require('../utils/errors');
+const { extractMentions, getMentionContext, normalizeMentions } = require('../utils/mentionUtils');
+const { NotFoundError, ValidationError, ForbiddenError } = require('../utils');
 const logger = require('../utils/logger');
 
 class AnswerService {
@@ -54,6 +55,9 @@ class AnswerService {
       // Process images (extract base64 data)
       const processedImages = this._processImages(images);
 
+      // Extract mentions from content
+      const mentions = normalizeMentions(extractMentions(content.trim()));
+
       // Create answer
       const answer = await AnswerRepository.create({
         discussion_id,
@@ -69,6 +73,11 @@ class AnswerService {
       // Get author info to include in response
       const author = await UserRepository.findById(userId);
 
+      // Handle mentions - create notifications for mentioned users
+      if (mentions.length > 0) {
+        await this._handleMentions(mentions, answer, author, discussion, 'reply');
+      }
+
       const enrichedAnswer = {
         ...answer,
         author_name: author.username,
@@ -80,7 +89,8 @@ class AnswerService {
       logger.info('Answer created successfully', {
         answerId: answer.id,
         discussionId: discussion_id,
-        userId
+        userId,
+        mentions: mentions.length
       });
 
       return {
@@ -293,6 +303,84 @@ class AnswerService {
     }
 
     return processedImages;
+  }
+
+  /**
+   * Handle mentions - find mentioned users and create notifications
+   * @param {Array<string>} mentions - Array of mentioned usernames
+   * @param {Object} answer - Answer object
+   * @param {Object} author - Author object
+   * @param {Object} discussion - Discussion object
+   * @param {string} type - Type of content (reply, comment, etc.)
+   * @private
+   */
+  async _handleMentions(mentions, answer, author, discussion, type = 'reply') {
+    if (!mentions || mentions.length === 0) {
+      return;
+    }
+
+    try {
+      // Find users by username (mentions are normalized to lowercase)
+      const users = await UserRepository.findByUsernames(mentions);
+
+      if (users.length === 0) {
+        logger.info('No valid users found for mentions', { mentions });
+        return;
+      }
+
+      // Prepare notifications for mentioned users
+      const notifications = [];
+
+      for (const user of users) {
+        // Don't notify the author of their own mention
+        if (user.id === author.id) {
+          continue;
+        }
+
+        // Get mention context from content
+        const mentionContext = getMentionContext(answer.content, user.username, 150);
+
+        const message = `${author.username || author.full_name || 'Someone'} mentioned you in a reply to "${discussion.title}"`;
+
+        notifications.push({
+          userId: user.id,
+          type: 'mention',
+          category: 'mentions',
+          message,
+          title: `Mentioned in Reply`,
+          content: mentionContext,
+          targetLink: `/discussions/${discussion.id}#answer-${answer.id}`,
+          targetId: answer.id,
+          targetType: type,
+          actorId: author.id,
+          actorName: author.username || author.full_name,
+          actorAvatar: author.profile_photo_url,
+          metadata: {
+            discussionId: discussion.id,
+            discussionTitle: discussion.title,
+            answerId: answer.id,
+            mentionType: type
+          }
+        });
+      }
+
+      // Notifications have been removed - mentions are still tracked but no notifications sent
+      if (notifications.length > 0) {
+        logger.info('Mentions processed (notifications disabled)', {
+          answerId: answer.id,
+          discussionId: discussion.id,
+          mentionedUsers: notifications.map(n => n.userId)
+        });
+      }
+
+    } catch (error) {
+      // Log error but don't fail the answer creation
+      logger.error('Error handling mentions in reply', {
+        answerId: answer.id,
+        mentions,
+        error: error.message
+      });
+    }
   }
 }
 

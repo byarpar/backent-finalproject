@@ -5,10 +5,8 @@
 
 const adminService = require('../services/adminService');
 const userService = require('../services/userService');
-const wordService = require('../services/wordService');
-const { sendSuccess, sendCreated, sendError } = require('../utils/response');
-const { asyncHandler } = require('../utils/helpers');
-const { HTTP_STATUS } = require('../config/constants');
+const { successResponse, errorResponse, sendSuccess, sendError, sendCreated, asyncHandler } = require('../utils');
+const { constants: { STATUS_CODES: HTTP_STATUS } } = require('../config');
 const logger = require('../utils/logger');
 
 /**
@@ -59,94 +57,6 @@ const getAllUsers = asyncHandler(async (req, res) => {
     'Users retrieved successfully',
     { pagination: result.pagination }
   );
-});
-
-/**
- * @desc    Get all words with admin filters
- * @route   GET /api/admin/words
- * @access  Admin
- */
-const getAllWords = asyncHandler(async (req, res) => {
-  const {
-    page = 1,
-    limit = 20,
-    search,
-    part_of_speech,
-    is_verified,
-    created_by,
-    sort_by = 'created_at',
-    order = 'desc'
-  } = req.query;
-
-  const filters = {
-    page: parseInt(page),
-    limit: parseInt(limit),
-    sortBy: sort_by,
-    order: order.toLowerCase()
-  };
-
-  if (search) filters.search = search;
-  if (part_of_speech) filters.part_of_speech = part_of_speech;
-  if (is_verified !== undefined) filters.is_verified = is_verified === 'true';
-  if (created_by) filters.created_by = parseInt(created_by);
-
-  const result = await wordService.searchWords(search || '', filters);
-
-  sendSuccess(
-    res,
-    HTTP_STATUS.OK,
-    { words: result.words || result },
-    'Words retrieved successfully',
-    {
-      pagination: {
-        total: result.total,
-        page: result.page,
-        limit: result.limit,
-        totalPages: result.totalPages
-      }
-    }
-  );
-});
-
-/**
- * @desc    Create new word (admin)
- * @route   POST /api/admin/words
- * @access  Admin
- */
-const createWord = asyncHandler(async (req, res) => {
-  const wordData = req.body;
-  const adminId = req.user.id;
-
-  const word = await wordService.createWord(wordData, adminId);
-
-  logger.info('Admin created word', {
-    adminId,
-    wordId: word.id,
-    english_word: word.english_word
-  });
-
-  sendCreated(res, word, 'Word created successfully');
-});
-
-/**
- * @desc    Update word (admin)
- * @route   PUT /api/admin/words/:id
- * @access  Admin
- */
-const updateWord = asyncHandler(async (req, res) => {
-  const { id } = req.params;
-  const updates = req.body;
-  const adminId = req.user.id;
-
-  const word = await wordService.updateWord(parseInt(id), updates, adminId);
-
-  logger.info('Admin updated word', {
-    adminId,
-    wordId: id,
-    changes: Object.keys(updates)
-  });
-
-  sendSuccess(res, HTTP_STATUS.OK, word, 'Word updated successfully');
 });
 
 /**
@@ -208,157 +118,6 @@ const deleteUser = asyncHandler(async (req, res) => {
   });
 
   sendSuccess(res, HTTP_STATUS.OK, null, 'User deleted successfully');
-});
-
-/**
- * @desc    Bulk import words from JSON
- * @route   POST /api/admin/words/bulk
- * @access  Admin
- */
-const bulkWords = asyncHandler(async (req, res) => {
-  const { words } = req.body;
-  const adminId = req.user.id;
-
-  if (!Array.isArray(words) || words.length === 0) {
-    return sendError(res, HTTP_STATUS.BAD_REQUEST, 'Words array is required');
-  }
-
-  const result = await wordService.bulkImport(words, adminId);
-
-  logger.info('Admin bulk imported words', {
-    adminId,
-    total: words.length,
-    imported: result.imported,
-    failed: result.failed
-  });
-
-  sendCreated(res, result, 'Bulk import completed');
-});
-
-/**
- * @desc    Import words from Excel/CSV file
- * @route   POST /api/admin/words/import
- * @access  Admin
- */
-const importWords = asyncHandler(async (req, res) => {
-  if (!req.file) {
-    return sendError(res, HTTP_STATUS.BAD_REQUEST, 'File is required');
-  }
-
-  const adminId = req.user.id;
-  const XLSX = require('xlsx');
-  const fs = require('fs');
-
-  try {
-    // Read the uploaded file
-    const workbook = XLSX.readFile(req.file.path);
-    const sheetName = workbook.SheetNames[0];
-    const worksheet = workbook.Sheets[sheetName];
-    const jsonData = XLSX.utils.sheet_to_json(worksheet);
-
-    // Map Excel columns to word schema
-    const words = jsonData.map(row => ({
-      english_word: row['English Word'] || row.english_word,
-      lisu_word: row['Lisu Word'] || row.lisu_word,
-      english_definition: row['English Definition'] || row.english_definition,
-      lisu_definition: row['Lisu Definition'] || row.lisu_definition,
-      part_of_speech: row['Part of Speech'] || row.part_of_speech,
-      pronunciation: row['Pronunciation'] || row.pronunciation,
-      examples: row['Examples'] ? (Array.isArray(row.Examples) ? row.Examples : [row.Examples]) : [],
-      synonyms: row['Synonyms'] ? (Array.isArray(row.Synonyms) ? row.Synonyms : row.Synonyms.split(',').map(s => s.trim())) : [],
-      antonyms: row['Antonyms'] ? (Array.isArray(row.Antonyms) ? row.Antonyms : row.Antonyms.split(',').map(s => s.trim())) : [],
-      etymology: row['Etymology'] || row.etymology,
-      tags: row['Tags'] ? (Array.isArray(row.Tags) ? row.Tags : row.Tags.split(',').map(t => t.trim())) : []
-    }));
-
-    // Import words
-    const result = await wordService.bulkImport(words, adminId);
-
-    // Clean up uploaded file
-    fs.unlinkSync(req.file.path);
-
-    logger.info('Admin imported words from file', {
-      adminId,
-      filename: req.file.originalname,
-      total: words.length,
-      imported: result.imported,
-      failed: result.failed
-    });
-
-    sendCreated(res, result, 'File import completed');
-
-  } catch (error) {
-    // Clean up file on error
-    if (req.file && fs.existsSync(req.file.path)) {
-      fs.unlinkSync(req.file.path);
-    }
-    throw error;
-  }
-});
-
-/**
- * @desc    Export words to Excel/CSV/JSON
- * @route   POST /api/admin/words/export
- * @access  Admin
- */
-const exportWords = asyncHandler(async (req, res) => {
-  const { format = 'xlsx', filters = {} } = req.body;
-  const XLSX = require('xlsx');
-  const path = require('path');
-
-  // Get words based on filters
-  const result = await wordService.getWords({
-    ...filters,
-    limit: 10000 // Export limit
-  });
-
-  const words = result.data;
-
-  if (format === 'json') {
-    // Export as JSON
-    res.setHeader('Content-Type', 'application/json');
-    res.setHeader('Content-Disposition', 'attachment; filename="words.json"');
-    return res.json(words);
-  }
-
-  // Prepare data for Excel/CSV
-  const exportData = words.map(word => ({
-    'ID': word.id,
-    'English Word': word.english_word,
-    'Lisu Word': word.lisu_word,
-    'English Definition': word.english_definition,
-    'Lisu Definition': word.lisu_definition,
-    'Part of Speech': word.part_of_speech,
-    'Pronunciation': word.pronunciation,
-    'Examples': Array.isArray(word.examples) ? word.examples.join('; ') : word.examples,
-    'Synonyms': Array.isArray(word.synonyms) ? word.synonyms.join(', ') : word.synonyms,
-    'Antonyms': Array.isArray(word.antonyms) ? word.antonyms.join(', ') : word.antonyms,
-    'Etymology': word.etymology,
-    'Tags': Array.isArray(word.tags) ? word.tags.join(', ') : word.tags,
-    'Verified': word.is_verified ? 'Yes' : 'No',
-    'Created By': word.created_by_username,
-    'Created At': word.created_at
-  }));
-
-  // Create workbook and worksheet
-  const worksheet = XLSX.utils.json_to_sheet(exportData);
-  const workbook = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(workbook, worksheet, 'Words');
-
-  // Generate buffer
-  const buffer = XLSX.write(workbook, { type: 'buffer', bookType: format === 'csv' ? 'csv' : 'xlsx' });
-
-  // Send file
-  const filename = `words_export_${Date.now()}.${format === 'csv' ? 'csv' : 'xlsx'}`;
-  res.setHeader('Content-Type', format === 'csv' ? 'text/csv' : 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
-  res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
-  res.send(buffer);
-
-  logger.info('Admin exported words', {
-    adminId: req.user.id,
-    format,
-    count: words.length
-  });
 });
 
 /**
@@ -543,15 +302,9 @@ const getModerationHistory = asyncHandler(async (req, res) => {
 module.exports = {
   getDashboardStats,
   getAllUsers,
-  getAllWords,
-  createWord,
-  updateWord,
   updateUserStatus,
   updateUserRole,
   deleteUser,
-  bulkWords,
-  importWords,
-  exportWords,
   downloadTemplate,
   getReports,
   resolveReport,

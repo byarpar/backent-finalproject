@@ -4,44 +4,10 @@
  */
 
 const logger = require('./logger');
-const { PAGINATION, REGEX } = require('../config/constants');
-const { ValidationError } = require('./errors');
+const { constants: { PAGINATION } } = require('../config');
+const { ValidationError } = require('./index');
 
-/**
- * Response formatter with consistent structure and metadata
- * @deprecated Use response.js functions instead
- */
-const formatResponse = (success, data, message = null, meta = {}) => {
-  const response = {
-    success,
-    timestamp: new Date().toISOString(),
-    ...meta
-  };
 
-  if (message) response.message = message;
-  if (data !== undefined) response.data = data;
-
-  return response;
-};
-
-/**
- * Error formatter with detailed error information
- * @deprecated Use response.js functions instead
- */
-const formatError = (message, details = null, code = null) => {
-  const error = {
-    success: false,
-    error: {
-      message,
-      timestamp: new Date().toISOString()
-    }
-  };
-
-  if (details) error.error.details = details;
-  if (code) error.error.code = code;
-
-  return error;
-};
 
 /**
  * Advanced input validation with multiple rule types
@@ -130,6 +96,7 @@ const safeParseFloat = (value, defaultValue = 0.0) => {
 
 /**
  * Enhanced pagination helper with comprehensive metadata
+ * Returns both camelCase and snake_case for backward compatibility
  */
 const paginate = (page = 1, limit = PAGINATION.DEFAULT_LIMIT, total = 0) => {
   const safePage = Math.max(1, safeParseInt(page, PAGINATION.DEFAULT_PAGE));
@@ -146,8 +113,11 @@ const paginate = (page = 1, limit = PAGINATION.DEFAULT_LIMIT, total = 0) => {
     offset,
     total,
     totalPages,
+    total_pages: totalPages, // Legacy support
     hasNext: safePage < totalPages,
+    has_next: safePage < totalPages, // Legacy support
     hasPrev: safePage > 1,
+    has_prev: safePage > 1, // Legacy support
     nextPage: safePage < totalPages ? safePage + 1 : null,
     prevPage: safePage > 1 ? safePage - 1 : null
   };
@@ -379,9 +349,7 @@ const retry = async (fn, maxAttempts = 3, delay = 1000, backoffMultiplier = 2) =
 };
 
 module.exports = {
-  // Legacy (deprecated)
-  formatResponse,
-  formatError,
+
 
   // Validation
   validateInput,
