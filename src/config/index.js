@@ -266,9 +266,17 @@ const corsOptions = {
 // EXPORTS
 // =============================================================================
 
+const features = {
+  emailVerification: process.env.ENABLE_EMAIL_VERIFICATION === 'true',
+  googleAuth: process.env.ENABLE_GOOGLE_AUTH === 'true',
+  chat: process.env.ENABLE_CHAT === 'true',
+  discussions: process.env.ENABLE_DISCUSSIONS === 'true',
+};
+
 module.exports = {
   env,
   constants,
+  features,
   dbConfig: dbConfig[env.NODE_ENV] || dbConfig.development,
   corsOptions
 };
