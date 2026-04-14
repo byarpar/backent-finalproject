@@ -12,6 +12,8 @@ const userRoutes = require('./users');
 const discussionRoutes = require('./discussions');
 const answerRoutes = require('./answers');
 const adminRoutes = require('./admin');
+const notificationRoutes = require('./notifications');
+const messageRoutes = require('./messages');
 
 // =============================================================================
 // ROUTE REGISTRATION
@@ -31,6 +33,12 @@ router.use('/answers', answerRoutes);
 
 // Admin routes - /api/admin
 router.use('/admin', adminRoutes);
+
+// Notification routes - /api/notifications
+router.use('/notifications', notificationRoutes);
+
+// Message routes - /api/messages
+router.use('/messages', messageRoutes);
 
 // =============================================================================
 // HEALTH CHECK ROUTE
