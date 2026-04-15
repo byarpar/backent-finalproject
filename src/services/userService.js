@@ -434,8 +434,31 @@ class UserService {
       // Create follow relationship
       const follow = await UserRepository.createFollow(followerId, followingId);
 
-      // Notifications have been removed
-      logger.info('Follow relationship created (notifications disabled)', { followerId, followingId });
+      // Create notification for followed user
+      try {
+        const [follower, followed] = await Promise.all([
+          UserRepository.findById(followerId),
+          UserRepository.findById(followingId)
+        ]);
+
+        if (follower && followed) {
+          const notificationController = require('../controllers/notificationController');
+          await notificationController.createNotification({
+            userId: followingId,
+            type: 'follow',
+            title: 'New follower',
+            message: `${follower.full_name || follower.username || 'Someone'} started following you`,
+            related_type: 'user',
+            related_id: followerId
+          });
+        }
+      } catch (notifError) {
+        logger.error('Error creating follow notification', {
+          followerId,
+          followingId,
+          error: notifError.message
+        });
+      }
 
       logger.info('User follow created', { followerId, followingId });
       return follow;

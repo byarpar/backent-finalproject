@@ -134,6 +134,11 @@ const authSchemas = {
   register: Joi.object({
     email: commonSchemas.email.required(),
     password: commonSchemas.password.required(),
+    recaptchaToken: Joi.string().trim().required()
+      .messages({
+        'any.required': 'reCAPTCHA token is required',
+        'string.empty': 'reCAPTCHA token is required'
+      }),
     username: commonSchemas.username.allow('').optional(),
     full_name: Joi.string().min(2).max(100).trim().required()
       .messages({
@@ -147,6 +152,11 @@ const authSchemas = {
 
   login: Joi.object({
     email: commonSchemas.email.required(),
+    recaptchaToken: Joi.string().trim().required()
+      .messages({
+        'any.required': 'reCAPTCHA token is required',
+        'string.empty': 'reCAPTCHA token is required'
+      }),
     password: Joi.string().required()
       .messages({
         'any.required': 'Password required',
@@ -181,7 +191,12 @@ const authSchemas = {
   }),
 
   forgotPassword: Joi.object({
-    email: commonSchemas.email.required()
+    email: commonSchemas.email.required(),
+    recaptchaToken: Joi.string().trim().required()
+      .messages({
+        'any.required': 'reCAPTCHA token is required',
+        'string.empty': 'reCAPTCHA token is required'
+      })
   }),
 
   verifyEmail: Joi.object({

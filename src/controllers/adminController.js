@@ -60,6 +60,28 @@ const getAllUsers = asyncHandler(async (req, res) => {
 });
 
 /**
+ * @desc    Get system health / info
+ * @route   GET /api/admin/system-info
+ * @access  Admin
+ */
+const getSystemInfo = asyncHandler(async (req, res) => {
+  const data = await adminService.getSystemHealth();
+  sendSuccess(res, HTTP_STATUS.OK, data, 'System info retrieved successfully');
+});
+
+/**
+ * @desc    Get single user with stats
+ * @route   GET /api/admin/users/:id
+ * @access  Admin
+ */
+const getUser = asyncHandler(async (req, res) => {
+  const { id } = req.params;
+  const user = await userService.getUserById(id);
+  const stats = await userService.getUserStatistics(id);
+  sendSuccess(res, HTTP_STATUS.OK, { user, stats }, 'User retrieved successfully');
+});
+
+/**
  * @desc    Update user status (active/inactive)
  * @route   PUT /api/admin/users/:id/status
  * @access  Admin
@@ -299,6 +321,37 @@ const getModerationHistory = asyncHandler(async (req, res) => {
   );
 });
 
+/**
+ * @desc    Get discussion stats (24h, 7d counts, most active)
+ * @route   GET /api/admin/discussion-stats
+ * @access  Admin
+ */
+const getDiscussionStats = asyncHandler(async (req, res) => {
+  const data = await adminService.getDiscussionStats();
+  sendSuccess(res, HTTP_STATUS.OK, data, 'Discussion stats retrieved successfully');
+});
+
+/**
+ * @desc    Get categories and tags data
+ * @route   GET /api/admin/categories-tags
+ * @access  Admin
+ */
+const getCategoriesAndTags = asyncHandler(async (req, res) => {
+  const data = await adminService.getCategoriesAndTags();
+  sendSuccess(res, HTTP_STATUS.OK, data, 'Categories and tags retrieved successfully');
+});
+
+/**
+ * @desc    Get analytics data
+ * @route   GET /api/admin/analytics
+ * @access  Admin
+ */
+const getAnalytics = asyncHandler(async (req, res) => {
+  const { timeRange = '30days' } = req.query;
+  const data = await adminService.getAnalytics(timeRange);
+  sendSuccess(res, HTTP_STATUS.OK, data, 'Analytics retrieved successfully');
+});
+
 module.exports = {
   getDashboardStats,
   getAllUsers,
@@ -309,5 +362,10 @@ module.exports = {
   getReports,
   resolveReport,
   dismissReport,
-  getModerationHistory
+  getModerationHistory,
+  getAnalytics,
+  getCategoriesAndTags,
+  getDiscussionStats,
+  getUser,
+  getSystemInfo
 };

@@ -1,6 +1,8 @@
 const express = require('express');
 const passport = require('passport');
 const AuthController = require('../controllers/authController');
+const authService = require('../services/authService');
+const logger = require('../utils/logger');
 const { authenticate } = require('../middlewares');
 const { validate, schemas } = require('../validations/schemas');
 
@@ -96,13 +98,35 @@ router.post('/check-deletion-status',
 
 // Only enable Google OAuth routes if credentials are configured
 if (process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET) {
+  const verifyGoogleRecaptcha = async (req, res, next) => {
+    try {
+      await authService.verifyRecaptchaToken(req.query.recaptchaToken, req.ip);
+      return next();
+    } catch (error) {
+      return res.status(400).json({
+        success: false,
+        error: {
+          message: error.message || 'reCAPTCHA verification failed',
+          code: 'RECAPTCHA_VERIFICATION_FAILED'
+        }
+      });
+    }
+  };
+
   /**
    * @route   GET /api/auth/google
    * @desc    Redirect to Google OAuth consent screen
    * @access  Public
    */
   router.get('/google',
-    passport.authenticate('google', { scope: ['profile', 'email'] })
+    verifyGoogleRecaptcha,
+    (req, res, next) => {
+      const oauthIntent = req.query.mode === 'register' ? 'register' : 'login';
+      return passport.authenticate('google', {
+        scope: ['profile', 'email'],
+        state: oauthIntent
+      })(req, res, next);
+    }
   );
 
   /**
@@ -111,6 +135,22 @@ if (process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET) {
    * @access  Public
    */
   router.get('/google/callback',
+    (req, res, next) => {
+      if (!req.query?.error) {
+        return next();
+      }
+
+      const frontendUrl = process.env.FRONTEND_URL || 'https://finalproject-frontend.lisudictionar.com';
+      const oauthError = encodeURIComponent(req.query.error);
+      const oauthMessage = encodeURIComponent(req.query.error_description || 'Google OAuth returned an error');
+
+      logger.warn('Google OAuth callback returned provider error', {
+        error: req.query.error,
+        errorDescription: req.query.error_description
+      });
+
+      return res.redirect(`${frontendUrl}/auth/callback?error=${oauthError}&message=${oauthMessage}`);
+    },
     passport.authenticate('google', {
       session: false,
       failWithError: true
@@ -118,7 +158,13 @@ if (process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET) {
     AuthController.googleCallback,
     // Error handler for OAuth failures
     (err, req, res, next) => {
-      const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
+      const frontendUrl = process.env.FRONTEND_URL || 'https://finalproject-frontend.lisudictionar.com';
+
+      logger.warn('Google OAuth callback authentication failure', {
+        message: err?.message,
+        code: err?.code,
+        name: err?.name
+      });
 
       // Check if account was deleted
       if (err.accountDeleted) {
@@ -126,7 +172,13 @@ if (process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET) {
         return res.redirect(`${frontendUrl}/auth/callback?error=${errorType}&message=${encodeURIComponent(err.message)}&email=${encodeURIComponent(err.email || '')}`);
       }
 
-      res.redirect(`${frontendUrl}/auth/callback?error=authentication_failed`);
+      // User attempted Google login without a registered account
+      if (err.accountNotFound) {
+        return res.redirect(`${frontendUrl}/auth/callback?error=account_not_found&message=${encodeURIComponent(err.message)}&email=${encodeURIComponent(err.email || '')}`);
+      }
+
+      const fallbackMessage = encodeURIComponent(err?.message || 'Google authentication failed. Please try again.');
+      res.redirect(`${frontendUrl}/auth/callback?error=authentication_failed&message=${fallbackMessage}`);
     }
   );
 } else {
@@ -142,7 +194,7 @@ if (process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET) {
   });
 
   router.get('/google/callback', (req, res) => {
-    const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
+    const frontendUrl = process.env.FRONTEND_URL || 'https://finalproject-frontend.lisudictionar.com';
     res.redirect(`${frontendUrl}/auth/callback?error=oauth_not_configured`);
   });
 }

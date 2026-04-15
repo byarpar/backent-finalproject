@@ -2,7 +2,7 @@ const express = require('express');
 const multer = require('multer');
 const path = require('path');
 const DiscussionController = require('../controllers/discussionController');
-const { authenticate, optionalAuth } = require('../middlewares');
+const { authenticate, authorize, optionalAuth } = require('../middlewares');
 const { validate, schemas } = require('../validations/schemas');
 
 const router = express.Router();
@@ -272,6 +272,7 @@ router.delete('/:id/solve',
  */
 router.put('/:id/pin',
   authenticate,
+  authorize('moderator'),
   validate(schemas.common.params.id, 'params'),
   DiscussionController.pinDiscussion
 );
@@ -283,6 +284,7 @@ router.put('/:id/pin',
  */
 router.delete('/:id/pin',
   authenticate,
+  authorize('moderator'),
   validate(schemas.common.params.id, 'params'),
   DiscussionController.unpinDiscussion
 );
@@ -294,6 +296,7 @@ router.delete('/:id/pin',
  */
 router.put('/:id/lock',
   authenticate,
+  authorize('moderator'),
   validate(schemas.common.params.id, 'params'),
   DiscussionController.lockDiscussion
 );
@@ -305,6 +308,7 @@ router.put('/:id/lock',
  */
 router.delete('/:id/lock',
   authenticate,
+  authorize('moderator'),
   validate(schemas.common.params.id, 'params'),
   DiscussionController.unlockDiscussion
 );

@@ -171,6 +171,19 @@ class DiscussionRepository extends BaseRepository {
       await this.db.query(`
         DO $$ 
         BEGIN 
+          IF NOT EXISTS (
+            SELECT 1 FROM information_schema.tables
+            WHERE table_schema = 'public' AND table_name = 'tags'
+          ) THEN
+            CREATE TABLE tags (
+              id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+              name VARCHAR(100) UNIQUE NOT NULL,
+              slug VARCHAR(100) UNIQUE NOT NULL,
+              usage_count INTEGER DEFAULT 0,
+              created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+            );
+            CREATE INDEX idx_tags_slug ON tags(slug);
+          END IF;
           IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='discussions' AND column_name='tags') THEN
             ALTER TABLE discussions ADD COLUMN tags TEXT[] DEFAULT '{}';
           END IF;
@@ -210,6 +223,8 @@ class DiscussionRepository extends BaseRepository {
         tagsArray,
         JSON.stringify(imagesArray)
       ]);
+
+      await this._syncTagsTable(tagsArray);
 
       logger.info('Discussion created', {
         discussionId: result.rows[0].id,
@@ -260,6 +275,8 @@ class DiscussionRepository extends BaseRepository {
         throw new NotFoundError('Discussion not found');
       }
 
+      await this._syncTagsTable(tags || []);
+
       logger.info('Discussion updated', { discussionId });
       return result.rows[0];
     } catch (error) {
@@ -273,12 +290,14 @@ class DiscussionRepository extends BaseRepository {
    */
   async delete(discussionId) {
     try {
-      const query = `DELETE FROM ${this.tableName} WHERE id = $1 RETURNING id`;
+      const query = `DELETE FROM ${this.tableName} WHERE id = $1 RETURNING id, tags`;
       const result = await this.db.query(query, [discussionId]);
 
       if (result.rows.length === 0) {
         throw new NotFoundError('Discussion not found');
       }
+
+      await this._syncTagsTable(result.rows[0].tags || []);
 
       logger.info('Discussion deleted', { discussionId });
       return true;
@@ -706,6 +725,70 @@ class DiscussionRepository extends BaseRepository {
   /**
    * Private helper methods
    */
+
+  async _syncTagsTable(changedTags = []) {
+    try {
+      // Ensure table exists in environments that predate migrations.
+      await this.db.query(`
+        CREATE TABLE IF NOT EXISTS tags (
+          id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+          name VARCHAR(100) UNIQUE NOT NULL,
+          slug VARCHAR(100) UNIQUE NOT NULL,
+          usage_count INTEGER DEFAULT 0,
+          created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+        )
+      `);
+
+      await this.db.query('CREATE INDEX IF NOT EXISTS idx_tags_slug ON tags(slug)');
+
+      if (Array.isArray(changedTags) && changedTags.length > 0) {
+        const normalized = [...new Set(
+          changedTags
+            .filter(tag => typeof tag === 'string' && tag.trim().length > 0)
+            .map(tag => tag.trim().toLowerCase())
+        )];
+
+        if (normalized.length > 0) {
+          await this.db.query(
+            `
+              INSERT INTO tags (name, slug)
+              SELECT tag, tag
+              FROM UNNEST($1::text[]) AS tag
+              ON CONFLICT (slug) DO NOTHING
+            `,
+            [normalized]
+          );
+        }
+      }
+
+      await this.db.query(`
+        UPDATE tags t
+        SET usage_count = COALESCE(src.cnt, 0)
+        FROM (
+          SELECT tag, COUNT(*)::int AS cnt
+          FROM discussions, UNNEST(tags) AS tag
+          WHERE tags IS NOT NULL AND array_length(tags, 1) > 0
+          GROUP BY tag
+        ) src
+        WHERE t.slug = src.tag
+      `);
+
+      await this.db.query(`
+        UPDATE tags
+        SET usage_count = 0
+        WHERE slug NOT IN (
+          SELECT DISTINCT tag
+          FROM discussions, UNNEST(tags) AS tag
+          WHERE tags IS NOT NULL AND array_length(tags, 1) > 0
+        )
+      `);
+
+      // Remove tags that are no longer used by any discussion.
+      await this.db.query('DELETE FROM tags WHERE usage_count <= 0');
+    } catch (error) {
+      logger.warn('Failed to sync tags table', { error: error.message });
+    }
+  }
 
   _buildWhereConditions(params, queryParams, whereConditions) {
     const { authorId, category, search, filter, userId } = params;

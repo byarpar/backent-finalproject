@@ -10,6 +10,20 @@ const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
 
+const ROLE_HIERARCHY = {
+  user: 1,
+  moderator: 2,
+  admin: 3,
+  super_admin: 4
+};
+
+const hasRoleAccess = (userRole, requiredRole) => {
+  const userLevel = ROLE_HIERARCHY[userRole] || 0;
+  const requiredLevel = ROLE_HIERARCHY[requiredRole] || 0;
+
+  return userLevel >= requiredLevel;
+};
+
 // =============================================================================
 // AUDIT MIDDLEWARE
 // =============================================================================
@@ -174,7 +188,13 @@ const authorize = (...roles) => {
       });
     }
 
-    if (!roles.includes(req.user.role)) {
+    if (!roles || roles.length === 0) {
+      return next();
+    }
+
+    const isAllowed = roles.some((role) => hasRoleAccess(req.user.role, role));
+
+    if (!isAllowed) {
       logger.warn('Authorization failed:', {
         userId: req.user.id,
         userRole: req.user.role,
@@ -293,6 +313,7 @@ const errorHandler = (error, req, res, next) => {
     success: false,
     message: error.message || 'Internal server error',
     code: cause,
+    ...(error.details ? { details: error.details } : {}),
     timestamp: new Date().toISOString(),
     ...(process.env.NODE_ENV === 'development' && { stack: error.stack })
   });
@@ -318,6 +339,7 @@ module.exports = {
   // Auth
   authenticate,
   authorize,
+  hasRoleAccess,
   optionalAuth,
 
   // Upload

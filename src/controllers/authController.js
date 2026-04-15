@@ -16,14 +16,16 @@ class AuthController {
    * POST /api/auth/register
    */
   register = asyncHandler(async (req, res) => {
-    const { email, password, username, full_name, role } = req.body;
+    const { email, password, username, full_name, role, recaptchaToken } = req.body;
 
     const result = await authService.register({
       email,
       password,
       username,
       full_name,
-      role
+      role,
+      recaptchaToken,
+      ipAddress: req.ip
     });
 
     sendCreated(res, result, 'Registration successful');
@@ -34,9 +36,9 @@ class AuthController {
    * POST /api/auth/login
    */
   login = asyncHandler(async (req, res) => {
-    const { email, password } = req.body;
+    const { email, password, recaptchaToken } = req.body;
 
-    const result = await authService.login(email, password);
+    const result = await authService.login(email, password, recaptchaToken, req.ip);
 
     sendSuccess(res, HTTP_STATUS.OK, result, 'Login successful');
   });
@@ -103,9 +105,9 @@ class AuthController {
    * POST /api/auth/forgot-password
    */
   forgotPassword = asyncHandler(async (req, res) => {
-    const { email } = req.body;
+    const { email, recaptchaToken } = req.body;
 
-    await authService.forgotPassword(email);
+    await authService.forgotPassword(email, recaptchaToken, req.ip);
 
     sendSuccess(res, HTTP_STATUS.OK, null, 'Password reset email sent if account exists');
   });

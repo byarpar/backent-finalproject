@@ -1,7 +1,33 @@
 const passport = require('passport');
 const GoogleStrategy = require('passport-google-oauth20').Strategy;
+const crypto = require('crypto');
 const userRepository = require('../repositories/UserRepository');
 const logger = require('../utils/logger');
+
+const sanitizeUsername = (value) => (value || '')
+  .toString()
+  .toLowerCase()
+  .replace(/[^a-z0-9_]/g, '_')
+  .replace(/_+/g, '_')
+  .replace(/^_+|_+$/g, '')
+  .slice(0, 28);
+
+const generateUniqueUsername = async ({ email, givenName, familyName, displayName }) => {
+  const emailPrefix = (email || '').split('@')[0];
+  const fullNameCandidate = [givenName, familyName].filter(Boolean).join('_');
+  const base = sanitizeUsername(fullNameCandidate || displayName || emailPrefix || 'user') || 'user';
+
+  const primaryExists = await userRepository.findByUsername(base);
+  if (!primaryExists) return base;
+
+  for (let attempt = 1; attempt <= 50; attempt += 1) {
+    const candidate = `${base}_${attempt}`.slice(0, 32);
+    const exists = await userRepository.findByUsername(candidate);
+    if (!exists) return candidate;
+  }
+
+  return `${base}_${crypto.randomBytes(3).toString('hex')}`.slice(0, 32);
+};
 
 // Serialize user for session
 passport.serializeUser((user, done) => {
@@ -26,14 +52,18 @@ if (process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET) {
       {
         clientID: process.env.GOOGLE_CLIENT_ID,
         clientSecret: process.env.GOOGLE_CLIENT_SECRET,
-        callbackURL: process.env.GOOGLE_CALLBACK_URL || 'http://localhost:3001/api/auth/google/callback',
+        callbackURL: process.env.GOOGLE_CALLBACK_URL || 'https://finalproject-backend.lisudictionar.com/api/auth/google/callback',
+        passReqToCallback: true,
         proxy: true
       },
-      async (accessToken, refreshToken, profile, done) => {
+      async (req, accessToken, refreshToken, profile, done) => {
         try {
+          const oauthIntent = req.query?.state === 'register' ? 'register' : 'login';
+
           logger.info('Google OAuth callback received', {
             profileId: profile.id,
-            email: profile.emails[0]?.value
+            email: profile.emails[0]?.value,
+            intent: oauthIntent
           });
 
           // Extract user information from Google profile
@@ -153,25 +183,48 @@ if (process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET) {
             return done(null, user);
           }
 
-          // New user - create account
-          const newUser = await userRepository.create({
+          if (oauthIntent === 'register') {
+            const username = await generateUniqueUsername({
+              email,
+              givenName,
+              familyName,
+              displayName: fullName
+            });
+
+            const internalPassword = crypto.randomBytes(24).toString('hex');
+
+            user = await userRepository.create({
+              email,
+              password: internalPassword,
+              username,
+              full_name: fullName || [givenName, familyName].filter(Boolean).join(' ') || username,
+              google_id: googleId,
+              oauth_provider: 'google',
+              profile_photo_url: profilePhoto,
+              email_verified: true
+            });
+
+            await userRepository.update(user.id, { last_login: new Date() });
+
+            logger.info('Created new user via Google OAuth registration', {
+              userId: user.id,
+              email: user.email,
+              username: user.username
+            });
+
+            return done(null, user);
+          }
+
+          logger.warn('Google OAuth denied for unregistered user', {
             email,
-            password: null, // OAuth users don't have passwords
-            username: email.split('@')[0] + '_' + Math.random().toString(36).substring(7), // Generate unique username
-            full_name: fullName,
-            google_id: googleId,
-            oauth_provider: 'google',
-            profile_photo_url: profilePhoto,
-            email_verified: true, // Google emails are pre-verified
-            role: 'user'
+            googleId,
+            intent: oauthIntent
           });
 
-          logger.info('New Google user created', {
-            userId: newUser.id,
-            email: newUser.email
-          });
-
-          done(null, newUser);
+          const error = new Error('No account found. Please register first, then login with Google.');
+          error.accountNotFound = true;
+          error.email = email;
+          return done(error, null);
 
         } catch (error) {
           logger.error('Google OAuth error:', {

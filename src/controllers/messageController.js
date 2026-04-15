@@ -5,6 +5,7 @@
 
 const { successResponse, errorResponse, asyncHandler } = require('../utils');
 const { db } = require('../config/database');
+const asError = (message) => ({ message });
 
 /**
  * Get all conversations for current user
@@ -32,7 +33,7 @@ const getConversations = asyncHandler(async (req, res) => {
     [userId]
   );
 
-  return successResponse(res, 'Conversations retrieved', { conversations: result.rows });
+  return successResponse(res, { conversations: result.rows }, 'Conversations retrieved');
 });
 
 /**
@@ -42,7 +43,7 @@ const getOrCreateConversation = asyncHandler(async (req, res) => {
   const userId = req.user.id;
   const { userId: otherId } = req.params;
 
-  if (userId === otherId) return errorResponse(res, 'Cannot message yourself', 400);
+  if (userId === otherId) return errorResponse(res, asError('Cannot message yourself'), 400);
 
   const p1 = userId < otherId ? userId : otherId;
   const p2 = userId < otherId ? otherId : userId;
@@ -53,7 +54,7 @@ const getOrCreateConversation = asyncHandler(async (req, res) => {
   );
 
   if (existing.rows[0]) {
-    return successResponse(res, 'Conversation found', { conversation: existing.rows[0] });
+    return successResponse(res, { conversation: existing.rows[0] }, 'Conversation found');
   }
 
   const result = await db.query(
@@ -61,7 +62,7 @@ const getOrCreateConversation = asyncHandler(async (req, res) => {
     [p1, p2]
   );
 
-  return successResponse(res, 'Conversation created', { conversation: result.rows[0] });
+  return successResponse(res, { conversation: result.rows[0] }, 'Conversation created');
 });
 
 /**
@@ -78,7 +79,7 @@ const getMessages = asyncHandler(async (req, res) => {
     `SELECT * FROM conversations WHERE id = $1 AND (participant1_id = $2 OR participant2_id = $2)`,
     [conversationId, userId]
   );
-  if (!conv.rows[0]) return errorResponse(res, 'Conversation not found', 404);
+  if (!conv.rows[0]) return errorResponse(res, asError('Conversation not found'), 404);
 
   const [messages, countResult] = await Promise.all([
     db.query(
@@ -97,12 +98,12 @@ const getMessages = asyncHandler(async (req, res) => {
     [conversationId, userId]
   );
 
-  return successResponse(res, 'Messages retrieved', {
+  return successResponse(res, {
     messages: messages.rows.reverse(),
     total: parseInt(countResult.rows[0].count),
     page: parseInt(page),
     limit: parseInt(limit)
-  });
+  }, 'Messages retrieved');
 });
 
 /**
@@ -113,13 +114,13 @@ const sendMessage = asyncHandler(async (req, res) => {
   const { conversationId } = req.params;
   const { content } = req.body;
 
-  if (!content?.trim()) return errorResponse(res, 'Message content is required', 400);
+  if (!content?.trim()) return errorResponse(res, asError('Message content is required'), 400);
 
   const conv = await db.query(
     `SELECT * FROM conversations WHERE id = $1 AND (participant1_id = $2 OR participant2_id = $2)`,
     [conversationId, userId]
   );
-  if (!conv.rows[0]) return errorResponse(res, 'Conversation not found', 404);
+  if (!conv.rows[0]) return errorResponse(res, asError('Conversation not found'), 404);
 
   const result = await db.query(
     `INSERT INTO messages (conversation_id, sender_id, content) VALUES ($1, $2, $3) RETURNING *`,
@@ -131,7 +132,7 @@ const sendMessage = asyncHandler(async (req, res) => {
     [conversationId]
   );
 
-  return successResponse(res, 'Message sent', { message: result.rows[0] });
+  return successResponse(res, { message: result.rows[0] }, 'Message sent');
 });
 
 /**
@@ -146,8 +147,8 @@ const deleteMessage = asyncHandler(async (req, res) => {
     [messageId, userId]
   );
 
-  if (!result.rows[0]) return errorResponse(res, 'Message not found', 404);
-  return successResponse(res, 'Message deleted');
+  if (!result.rows[0]) return errorResponse(res, asError('Message not found'), 404);
+  return successResponse(res, null, 'Message deleted');
 });
 
 module.exports = {
