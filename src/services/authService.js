@@ -34,6 +34,11 @@ class AuthService {
    * @private
    */
   async _verifyRecaptchaToken(token, ipAddress = null) {
+    // Skip reCAPTCHA verification in development mode
+    if (process.env.NODE_ENV === 'development') {
+      return true;
+    }
+
     if (!token) {
       throw new ValidationError('Please complete reCAPTCHA verification', {
         field: 'recaptchaToken'
