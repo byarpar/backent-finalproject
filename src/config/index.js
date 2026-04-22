@@ -16,6 +16,7 @@ dotenv.config();
 const env = {
   NODE_ENV: process.env.NODE_ENV || 'development',
   PORT: parseInt(process.env.PORT, 10) || 5000,
+  BCRYPT_ROUNDS: parseInt(process.env.BCRYPT_ROUNDS, 10) || 12,
 
   // Database
   DATABASE_URL: process.env.DATABASE_URL,
@@ -49,6 +50,11 @@ const env = {
   UPLOAD_PATH: process.env.UPLOAD_PATH || path.join(__dirname, '../../uploads')
 };
 
+// Backward-compatible nested config expected by repository/service code.
+env.auth = {
+  bcryptRounds: env.BCRYPT_ROUNDS
+};
+
 // Validate required environment variables
 const requiredVars = ['JWT_SECRET'];
 const missingVars = requiredVars.filter(varName => !env[varName]);
@@ -69,29 +75,18 @@ const constants = {
     ADMIN: 'admin'
   },
 
-  // Discussion categories
+  // Discussion categories (must match DB CHECK constraint)
   DISCUSSION_CATEGORIES: {
-    PROGRAMMING: 'programming',
-    WEB_DEVELOPMENT: 'web-development',
-    CYBERSECURITY: 'cybersecurity',
-    DATA_SCIENCE: 'data-science',
-    AI: 'artificial-intelligence',
-    MACHINE_LEARNING: 'machine-learning',
-    CLOUD_COMPUTING: 'cloud-computing',
-    NETWORKING: 'networking',
-    DATABASE_SYSTEMS: 'database-systems',
-    SOFTWARE_ENGINEERING: 'software-engineering',
-    DEVOPS: 'devops',
-    SYSTEM_ADMIN: 'system-administration',
-    MOBILE_DEV: 'mobile-app-development',
-    GAME_DEV: 'game-development',
-    UI_UX: 'ui-ux-design',
-    COMPUTER_ARCH: 'computer-architecture',
-    OPERATING_SYSTEMS: 'operating-systems',
-    ALGORITHMS: 'algorithms-data-structures',
-    IOT: 'iot',
-    BLOCKCHAIN: 'blockchain-technology',
-    GENERAL: 'general'
+    GENERAL: 'general',
+    JAVASCRIPT: 'javascript',
+    PYTHON: 'python',
+    JAVA: 'java',
+    CPP: 'cpp',
+    CSHARP: 'csharp',
+    PHP: 'php',
+    GO: 'go',
+    RUST: 'rust',
+    OTHER: 'other'
   },
 
   // Vote types
@@ -274,9 +269,17 @@ const features = {
 // EXPORTS
 // =============================================================================
 
+const features = {
+  emailVerification: process.env.ENABLE_EMAIL_VERIFICATION === 'true',
+  googleAuth: process.env.ENABLE_GOOGLE_AUTH === 'true',
+  chat: process.env.ENABLE_CHAT === 'true',
+  discussions: process.env.ENABLE_DISCUSSIONS === 'true',
+};
+
 module.exports = {
   env,
   constants,
+  features,
   dbConfig: dbConfig[env.NODE_ENV] || dbConfig.development,
   corsOptions,
   features

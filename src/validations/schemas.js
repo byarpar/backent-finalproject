@@ -130,10 +130,19 @@ const commonSchemas = {
 // Authentication Schemas
 // ============================================
 
+const isDev = process.env.NODE_ENV === 'development';
+const recaptchaField = isDev
+  ? Joi.string().trim().allow('', null).optional()
+  : Joi.string().trim().required().messages({
+    'any.required': 'reCAPTCHA token is required',
+    'string.empty': 'reCAPTCHA token is required'
+  });
+
 const authSchemas = {
   register: Joi.object({
     email: commonSchemas.email.required(),
     password: commonSchemas.password.required(),
+    recaptchaToken: recaptchaField,
     username: commonSchemas.username.allow('').optional(),
     full_name: Joi.string().min(2).max(100).trim().required()
       .messages({
@@ -147,6 +156,7 @@ const authSchemas = {
 
   login: Joi.object({
     email: commonSchemas.email.required(),
+    recaptchaToken: recaptchaField,
     password: Joi.string().required()
       .messages({
         'any.required': 'Password required',
@@ -181,7 +191,8 @@ const authSchemas = {
   }),
 
   forgotPassword: Joi.object({
-    email: commonSchemas.email.required()
+    email: commonSchemas.email.required(),
+    recaptchaToken: recaptchaField
   }),
 
   verifyEmail: Joi.object({

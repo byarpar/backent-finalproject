@@ -8,6 +8,9 @@ const UserRepository = require('../repositories/UserRepository');
 const { extractMentions, getMentionContext, normalizeMentions } = require('../utils/mentionUtils');
 const { NotFoundError, ValidationError, ForbiddenError } = require('../utils');
 const logger = require('../utils/logger');
+const notificationController = require('../controllers/notificationController');
+
+const isModeratorOrHigher = (role) => ['moderator', 'admin', 'super_admin'].includes(role);
 
 class AnswerService {
   /**
@@ -123,7 +126,7 @@ class AnswerService {
         throw new NotFoundError('Answer not found');
       }
 
-      if (answer.author_id !== userId && userRole !== 'admin') {
+      if (answer.author_id !== userId && !isModeratorOrHigher(userRole)) {
         throw new ForbiddenError('You do not have permission to edit this answer');
       }
 
@@ -157,7 +160,7 @@ class AnswerService {
         throw new NotFoundError('Answer not found');
       }
 
-      if (answer.author_id !== userId && userRole !== 'admin') {
+      if (answer.author_id !== userId && !isModeratorOrHigher(userRole)) {
         throw new ForbiddenError('You do not have permission to delete this answer');
       }
 
@@ -364,12 +367,19 @@ class AnswerService {
         });
       }
 
-      // Notifications have been removed - mentions are still tracked but no notifications sent
       if (notifications.length > 0) {
-        logger.info('Mentions processed (notifications disabled)', {
+        logger.info('Processing mention notifications', {
           answerId: answer.id,
           discussionId: discussion.id,
-          mentionedUsers: notifications.map(n => n.userId)
+          mentionCount: notifications.length
+        });
+
+        await Promise.all(notifications.map((notif) => notificationController.createNotification(notif)));
+
+        logger.info('Mention notifications created', {
+          answerId: answer.id,
+          discussionId: discussion.id,
+          mentionedUsers: notifications.map((n) => n.userId)
         });
       }
 

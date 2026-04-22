@@ -156,7 +156,7 @@ class DatabaseInitializer {
           id SERIAL PRIMARY KEY,
           title VARCHAR(255) NOT NULL,
           content TEXT NOT NULL,
-          category VARCHAR(50) DEFAULT 'general',
+          category VARCHAR(50) DEFAULT 'general' CHECK (category IN ('general','javascript','python','java','cpp','csharp','php','go','rust','other')),
           author_id UUID REFERENCES users(id),
           tags TEXT[] DEFAULT '{}',
           images JSONB,
@@ -170,6 +170,17 @@ class DatabaseInitializer {
           last_activity TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
           created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
           updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+        )
+      `);
+
+      // Create tags table (source of truth for tag metadata)
+      await client.query(`
+        CREATE TABLE tags (
+          id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+          name VARCHAR(100) UNIQUE NOT NULL,
+          slug VARCHAR(100) UNIQUE NOT NULL,
+          usage_count INTEGER DEFAULT 0,
+          created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
         )
       `);
 
@@ -235,6 +246,8 @@ class DatabaseInitializer {
       'CREATE INDEX idx_discussions_category ON discussions(category)',
       'CREATE INDEX idx_discussions_author ON discussions(author_id)',
       'CREATE INDEX idx_discussions_created_at ON discussions(created_at)',
+      'CREATE INDEX idx_tags_slug ON tags(slug)',
+      'CREATE INDEX idx_tags_usage_count ON tags(usage_count)',
 
       'CREATE INDEX idx_user_favorites_user ON user_favorites(user_id)',
       'CREATE INDEX idx_user_favorites_word ON user_favorites(word_id)',

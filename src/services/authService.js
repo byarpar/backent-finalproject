@@ -23,6 +23,76 @@ const GRACE_PERIOD_MS = GRACE_PERIOD_DAYS * 24 * 60 * 60 * 1000;
 
 class AuthService {
   /**
+   * Public wrapper for reCAPTCHA verification.
+   */
+  async verifyRecaptchaToken(token, ipAddress = null) {
+    return this._verifyRecaptchaToken(token, ipAddress);
+  }
+
+  /**
+   * Verify Google reCAPTCHA token server-side.
+   * @private
+   */
+  async _verifyRecaptchaToken(token, ipAddress = null) {
+    // Skip reCAPTCHA verification in development mode
+    if (process.env.NODE_ENV === 'development') {
+      return true;
+    }
+
+    if (!token) {
+      throw new ValidationError('Please complete reCAPTCHA verification', {
+        field: 'recaptchaToken'
+      });
+    }
+
+    const secret = process.env.RECAPTCHA_SECRET_KEY;
+    if (!secret) {
+      logger.error('reCAPTCHA secret key is not configured');
+      throw new ValidationError('reCAPTCHA is not configured on the server');
+    }
+
+    const params = new URLSearchParams();
+    params.append('secret', secret);
+    params.append('response', token);
+    if (ipAddress) {
+      params.append('remoteip', ipAddress);
+    }
+
+    let verifyResponse;
+    try {
+      verifyResponse = await fetch('https://www.google.com/recaptcha/api/siteverify', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded'
+        },
+        body: params
+      });
+    } catch (error) {
+      logger.error('reCAPTCHA verification request failed', {
+        error: error.message
+      });
+      throw new ValidationError('Unable to verify reCAPTCHA. Please try again.');
+    }
+
+    if (!verifyResponse.ok) {
+      logger.error('reCAPTCHA verify endpoint returned non-OK status', {
+        status: verifyResponse.status
+      });
+      throw new ValidationError('Unable to verify reCAPTCHA. Please try again.');
+    }
+
+    const verifyResult = await verifyResponse.json();
+    if (!verifyResult.success) {
+      logger.warn('reCAPTCHA verification failed', {
+        errorCodes: verifyResult['error-codes'] || []
+      });
+      throw new ValidationError('reCAPTCHA verification failed. Please try again.', {
+        errorCodes: verifyResult['error-codes'] || []
+      });
+    }
+  }
+
+  /**
    * Calculate deletion grace period information
    * @private
    */
@@ -81,7 +151,18 @@ class AuthService {
    * Register a new user
    */
   async register(userData) {
-    const { email, password, username, full_name, role = 'user' } = userData;
+    const {
+      email,
+      password,
+      username,
+      full_name,
+      role = 'user',
+      recaptchaToken,
+      ipAddress
+    } = userData;
+
+    // Validate reCAPTCHA before any account creation logic
+    await this._verifyRecaptchaToken(recaptchaToken, ipAddress);
 
     // Check if user already exists
     const existingUser = await UserRepository.findByEmail(email);
@@ -147,7 +228,9 @@ class AuthService {
   /**
    * Login user with email and password
    */
-  async login(email, password) {
+  async login(email, password, recaptchaToken, ipAddress = null) {
+    await this._verifyRecaptchaToken(recaptchaToken, ipAddress);
+
     // Find user (including deleted accounts)
     let user = await UserRepository.findByEmail(email);
 
@@ -354,7 +437,9 @@ class AuthService {
   /**
    * Request password reset
    */
-  async forgotPassword(email) {
+  async forgotPassword(email, recaptchaToken, ipAddress = null) {
+    await this._verifyRecaptchaToken(recaptchaToken, ipAddress);
+
     const user = await UserRepository.findByEmail(email);
     if (!user) {
       // Don't reveal if user exists

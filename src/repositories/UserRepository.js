@@ -9,6 +9,11 @@ const { ConflictError, NotFoundError, ValidationError } = require('../utils');
 const logger = require('../utils/logger');
 const { env: config } = require('../config');
 
+const getBcryptRounds = () => {
+  const rounds = Number(config?.auth?.bcryptRounds || config?.BCRYPT_ROUNDS || 12);
+  return Number.isFinite(rounds) && rounds > 3 ? rounds : 12;
+};
+
 class UserRepository extends BaseRepository {
   constructor() {
     super('users');
@@ -157,7 +162,7 @@ class UserRepository extends BaseRepository {
     // Hash password if provided
     let password_hash = null;
     if (password) {
-      password_hash = await bcrypt.hash(password, config.auth.bcryptRounds);
+      password_hash = await bcrypt.hash(password, getBcryptRounds());
     }
 
     try {
@@ -222,7 +227,7 @@ class UserRepository extends BaseRepository {
    * Update user password
    */
   async updatePassword(id, newPassword) {
-    const password_hash = await bcrypt.hash(newPassword, config.auth.bcryptRounds);
+    const password_hash = await bcrypt.hash(newPassword, getBcryptRounds());
 
     const query = `
       UPDATE ${this.tableName}

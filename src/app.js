@@ -20,6 +20,8 @@ const adminRoutes = require('./routes/admin');
 const discussionRoutes = require('./routes/discussions');
 const answerRoutes = require('./routes/answers');
 const userRoutes = require('./routes/users');
+const notificationRoutes = require('./routes/notifications');
+const messageRoutes = require('./routes/messages');
 
 // Create Express application
 const app = express();
@@ -33,8 +35,66 @@ app.use(helmet({
 }));
 
 // CORS configuration
+const normalizeOrigin = (origin) => {
+  if (!origin || typeof origin !== 'string') return null;
+
+  try {
+    const parsed = new URL(origin.trim());
+    return `${parsed.protocol}//${parsed.host}`.toLowerCase();
+  } catch (error) {
+    return null;
+  }
+};
+
+const configuredOrigins = new Set(
+  [
+    process.env.FRONTEND_URL,
+    ...(process.env.CORS_ORIGINS || '').split(',').map((origin) => origin.trim())
+  ]
+    .map(normalizeOrigin)
+    .filter(Boolean)
+);
+
+const allowTrustedPublicOrigin = (origin) => {
+  const normalized = normalizeOrigin(origin);
+  if (!normalized) return false;
+
+  // Support Cloudflare/named tunnel domains under the main public zone.
+  return /^https?:\/\/[a-z0-9-]+\.lisudictionar\.com$/i.test(normalized);
+};
+
+const allowLocalNetworkOrigin = (origin) => {
+  if (process.env.NODE_ENV !== 'development') return false;
+
+  // Permit common private-network dev hosts on port 3000.
+  return /^http:\/\/(192\.168\.\d+\.\d+|10\.\d+\.\d+\.\d+|172\.(1[6-9]|2\d|3[0-1])\.\d+\.\d+):3000$/.test(origin);
+};
+
 app.use(cors({
-  origin: process.env.FRONTEND_URL || 'http://localhost:3000',
+  origin: (origin, callback) => {
+    if (!origin) return callback(null, true);
+
+    const normalizedOrigin = normalizeOrigin(origin);
+
+    if (
+      (normalizedOrigin && configuredOrigins.has(normalizedOrigin)) ||
+      allowLocalNetworkOrigin(origin) ||
+      allowTrustedPublicOrigin(origin)
+    ) {
+      return callback(null, true);
+    }
+
+    logger.warn('CORS rejected request origin', {
+      origin,
+      normalizedOrigin,
+      configuredOrigins: Array.from(configuredOrigins)
+    });
+
+    const corsError = new Error('Not allowed by CORS');
+    corsError.status = 403;
+    corsError.code = 'CORS_ORIGIN_DENIED';
+    return callback(corsError);
+  },
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization']
@@ -113,6 +173,8 @@ app.use('/api/admin', adminRoutes);
 app.use('/api/discussions', discussionRoutes);
 app.use('/api/answers', answerRoutes);
 app.use('/api/users', userRoutes);
+app.use('/api/notifications', notificationRoutes);
+app.use('/api/messages', messageRoutes);
 
 // Serve uploaded images statically
 app.use('/uploads', express.static(path.join(__dirname, '../uploads')));

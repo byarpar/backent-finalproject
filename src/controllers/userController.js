@@ -212,6 +212,79 @@ class UserController {
   });
 
   /**
+   * Follow a user
+   * POST /api/users/:userId/follow
+   */
+  followUser = asyncHandler(async (req, res) => {
+    const followerId = req.user.id;
+    const { userId: followingId } = req.params;
+
+    const follow = await userService.followUser(followerId, followingId);
+
+    sendSuccess(res, HTTP_STATUS.OK, { follow }, 'User followed successfully');
+  });
+
+  /**
+   * Unfollow a user
+   * DELETE /api/users/:userId/follow
+   */
+  unfollowUser = asyncHandler(async (req, res) => {
+    const followerId = req.user.id;
+    const { userId: followingId } = req.params;
+
+    await userService.unfollowUser(followerId, followingId);
+
+    sendSuccess(res, HTTP_STATUS.OK, null, 'User unfollowed successfully');
+  });
+
+  /**
+   * Get follow information for a user
+   * GET /api/users/:userId/follow-info
+   */
+  getFollowInfo = asyncHandler(async (req, res) => {
+    const { userId } = req.params;
+    const currentUserId = req.user?.id || null;
+
+    const followInfo = await userService.getFollowInfo(userId, currentUserId);
+
+    sendSuccess(res, HTTP_STATUS.OK, followInfo, 'Follow info retrieved');
+  });
+
+  /**
+   * Get followers for a user
+   * GET /api/users/:userId/followers
+   */
+  getUserFollowers = asyncHandler(async (req, res) => {
+    const { userId } = req.params;
+    const { page = 1, limit = 50 } = req.query;
+
+    const safeLimit = Math.max(1, Number(limit) || 50);
+    const safePage = Math.max(1, Number(page) || 1);
+    const offset = (safePage - 1) * safeLimit;
+
+    const followers = await userService.getUserFollowers(userId, { limit: safeLimit, offset });
+
+    sendSuccess(res, HTTP_STATUS.OK, { followers, page: safePage, limit: safeLimit }, 'Followers retrieved');
+  });
+
+  /**
+   * Get users a user follows
+   * GET /api/users/:userId/following
+   */
+  getUserFollowing = asyncHandler(async (req, res) => {
+    const { userId } = req.params;
+    const { page = 1, limit = 50 } = req.query;
+
+    const safeLimit = Math.max(1, Number(limit) || 50);
+    const safePage = Math.max(1, Number(page) || 1);
+    const offset = (safePage - 1) * safeLimit;
+
+    const following = await userService.getUserFollowing(userId, { limit: safeLimit, offset });
+
+    sendSuccess(res, HTTP_STATUS.OK, { following, page: safePage, limit: safeLimit }, 'Following retrieved');
+  });
+
+  /**
    * Get multiple user UUIDs by usernames
    * POST /api/users/lookup
    */

@@ -8,6 +8,9 @@ const UserRepository = require('../repositories/UserRepository');
 const { extractMentions, processMentions, getMentionStats, normalizeMentions, getMentionContext } = require('../utils');
 const { NotFoundError, ValidationError, ForbiddenError } = require('../utils');
 const logger = require('../utils/logger');
+const notificationController = require('../controllers/notificationController');
+
+const isModeratorOrHigher = (role) => ['moderator', 'admin', 'super_admin'].includes(role);
 
 class DiscussionService {
   /**
@@ -15,155 +18,65 @@ class DiscussionService {
    */
   getCategoryMetadata() {
     return {
-      home: {
-        name: 'Home',
-        icon: '🏠',
-        color: '#10b981',
-        description: 'Welcome to the community'
-      },
       general: {
         name: 'General Discussion',
         icon: '💬',
         color: '#6366f1',
         description: 'General topics and casual conversation'
       },
-      programming: {
-        name: 'Programming',
-        icon: '💻',
-        color: '#ec4899',
-        description: 'General programming concepts and best practices'
-      },
-      'web-development': {
-        name: 'Web Development',
-        icon: '🌐',
+      javascript: {
+        name: 'JavaScript',
+        icon: '🟨',
         color: '#f59e0b',
-        description: 'Web development frameworks, tools, and techniques'
+        description: 'JavaScript language, frameworks, and best practices'
       },
-      cybersecurity: {
-        name: 'Cybersecurity',
-        icon: '🔒',
+      python: {
+        name: 'Python',
+        icon: '🐍',
+        color: '#10b981',
+        description: 'Python development, tooling, and patterns'
+      },
+      java: {
+        name: 'Java',
+        icon: '☕',
         color: '#ef4444',
-        description: 'Security threats, vulnerabilities, and best practices'
+        description: 'Java language, JVM ecosystem, and enterprise development'
       },
-      'data-science': {
-        name: 'Data Science',
-        icon: '📊',
-        color: '#10b981',
-        description: 'Data analysis, visualization, and insights'
-      },
-      'artificial-intelligence': {
-        name: 'Artificial Intelligence',
-        icon: '🤖',
-        color: '#8b5cf6',
-        description: 'AI concepts, neural networks, and machine learning'
-      },
-      'machine-learning': {
-        name: 'Machine Learning',
-        icon: '🧠',
-        color: '#3b82f6',
-        description: 'ML models, training, and frameworks'
-      },
-      'cloud-computing': {
-        name: 'Cloud Computing',
-        icon: '☁️',
-        color: '#06b6d4',
-        description: 'Cloud platforms, deployment, and infrastructure'
-      },
-      networking: {
-        name: 'Networking',
-        icon: '🔗',
-        color: '#f97316',
-        description: 'Network protocols, routing, and infrastructure'
-      },
-      'database-systems': {
-        name: 'Database Systems',
-        icon: '🗄️',
-        color: '#14b8a6',
-        description: 'SQL, NoSQL, optimization, and design'
-      },
-      'software-engineering': {
-        name: 'Software Engineering',
+      cpp: {
+        name: 'C/C++',
         icon: '⚙️',
-        color: '#64748b',
-        description: 'Architecture, design patterns, and best practices'
-      },
-      devops: {
-        name: 'DevOps',
-        icon: '🚀',
-        color: '#ff6b6b',
-        description: 'CI/CD, containerization, and automation'
-      },
-      'system-administration': {
-        name: 'System Administration',
-        icon: '👨‍💼',
-        color: '#a78bfa',
-        description: 'Server management, Linux, and administration'
-      },
-      'mobile-app-development': {
-        name: 'Mobile App Development',
-        icon: '📱',
-        color: '#06b6d4',
-        description: 'iOS, Android, and cross-platform development'
-      },
-      'game-development': {
-        name: 'Game Development',
-        icon: '🎮',
-        color: '#ec4899',
-        description: 'Game engines, graphics, and gameplay'
-      },
-      'ui-ux-design': {
-        name: 'UI/UX Design',
-        icon: '🎨',
-        color: '#f59e0b',
-        description: 'Design principles, tools, and user experience'
-      },
-      'computer-architecture': {
-        name: 'Computer Architecture',
-        icon: '🏗️',
-        color: '#10b981',
-        description: 'CPU, memory, and system architecture'
-      },
-      'operating-systems': {
-        name: 'Operating Systems',
-        icon: '🖥️',
-        color: '#6366f1',
-        description: 'OS concepts, kernel, and processes'
-      },
-      'algorithms-data-structures': {
-        name: 'Algorithms & Data Structures',
-        icon: '📐',
-        color: '#f97316',
-        description: 'Algorithms, complexity, and data structure design'
-      },
-      iot: {
-        name: 'Internet of Things (IoT)',
-        icon: '📡',
         color: '#14b8a6',
-        description: 'Embedded systems, sensors, and IoT devices'
+        description: 'C and C++ programming, performance, and systems topics'
       },
-      'blockchain-technology': {
-        name: 'Blockchain Technology',
-        icon: '⛓️',
-        color: '#f59e0b',
-        description: 'Cryptocurrency, smart contracts, and blockchain'
+      csharp: {
+        name: 'C#/.NET',
+        icon: '🟪',
+        color: '#8b5cf6',
+        description: 'C# language and .NET application development'
       },
-      members: {
-        name: 'Members',
-        icon: '👥',
+      php: {
+        name: 'PHP',
+        icon: '🐘',
         color: '#3b82f6',
-        description: 'Connect with community members'
+        description: 'PHP language, frameworks, and backend development'
       },
-      'community-chat': {
-        name: 'Community Chat',
-        icon: '💭',
-        color: '#14b8a6',
-        description: 'Casual chat and community conversations'
+      go: {
+        name: 'Go',
+        icon: '🐹',
+        color: '#06b6d4',
+        description: 'Go programming, concurrency, and backend services'
+      },
+      rust: {
+        name: 'Rust',
+        icon: '🦀',
+        color: '#f97316',
+        description: 'Rust language, memory safety, and systems programming'
       },
       other: {
         name: 'Other',
         icon: '💭',
         color: '#6b7280',
-        description: 'Other topics and discussions'
+        description: 'Other programming topics and discussions'
       }
     };
   }
@@ -313,7 +226,7 @@ class DiscussionService {
       // Check if discussion exists and verify permissions
       const discussion = await DiscussionRepository.findByIdWithContext(discussionId);
 
-      if (discussion.author_id !== userId && userRole !== 'admin') {
+      if (discussion.author_id !== userId && !isModeratorOrHigher(userRole)) {
         throw new ForbiddenError('You do not have permission to edit this discussion');
       }
 
@@ -376,7 +289,7 @@ class DiscussionService {
       // Check if discussion exists and verify permissions
       const discussion = await DiscussionRepository.findByIdWithContext(discussionId);
 
-      if (discussion.author_id !== userId && userRole !== 'admin') {
+      if (discussion.author_id !== userId && !isModeratorOrHigher(userRole)) {
         throw new ForbiddenError('You do not have permission to delete this discussion');
       }
 
@@ -475,12 +388,12 @@ class DiscussionService {
   }
 
   /**
-   * Pin discussion (admin only)
+   * Pin discussion (moderator+)
    */
   async pinDiscussion(discussionId, userRole) {
     try {
-      if (userRole !== 'admin') {
-        throw new ForbiddenError('Only admins can pin discussions');
+      if (!isModeratorOrHigher(userRole)) {
+        throw new ForbiddenError('Only moderators or admins can pin discussions');
       }
 
       const updatedDiscussion = await DiscussionRepository.pinDiscussion(discussionId);
@@ -495,12 +408,12 @@ class DiscussionService {
   }
 
   /**
-   * Unpin discussion (admin only)
+   * Unpin discussion (moderator+)
    */
   async unpinDiscussion(discussionId, userRole) {
     try {
-      if (userRole !== 'admin') {
-        throw new ForbiddenError('Only admins can unpin discussions');
+      if (!isModeratorOrHigher(userRole)) {
+        throw new ForbiddenError('Only moderators or admins can unpin discussions');
       }
 
       const updatedDiscussion = await DiscussionRepository.unpinDiscussion(discussionId);
@@ -515,12 +428,12 @@ class DiscussionService {
   }
 
   /**
-   * Lock discussion (admin only)
+   * Lock discussion (moderator+)
    */
   async lockDiscussion(discussionId, userRole) {
     try {
-      if (userRole !== 'admin') {
-        throw new ForbiddenError('Only admins can lock discussions');
+      if (!isModeratorOrHigher(userRole)) {
+        throw new ForbiddenError('Only moderators or admins can lock discussions');
       }
 
       const updatedDiscussion = await DiscussionRepository.lockDiscussion(discussionId);
@@ -535,12 +448,12 @@ class DiscussionService {
   }
 
   /**
-   * Unlock discussion (admin only)
+   * Unlock discussion (moderator+)
    */
   async unlockDiscussion(discussionId, userRole) {
     try {
-      if (userRole !== 'admin') {
-        throw new ForbiddenError('Only admins can unlock discussions');
+      if (!isModeratorOrHigher(userRole)) {
+        throw new ForbiddenError('Only moderators or admins can unlock discussions');
       }
 
       const updatedDiscussion = await DiscussionRepository.unlockDiscussion(discussionId);
@@ -810,9 +723,9 @@ class DiscussionService {
         });
       }
 
-      // Notifications have been removed - mentions are still tracked but no notifications sent
       if (notifications.length > 0) {
-        logger.info('Mentions processed (notifications disabled)', {
+        await Promise.all(notifications.map((notif) => notificationController.createNotification(notif)));
+        logger.info('Mention notifications created', {
           discussionId: discussion.id,
           mentionedUsers: notifications.map(n => n.userId),
           isUpdate

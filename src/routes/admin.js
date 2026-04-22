@@ -16,7 +16,7 @@ const router = express.Router();
  */
 router.get('/dashboard',
   authenticate,
-  authorize('admin', 'super_admin'),
+  authorize('admin'),
   AdminController.getDashboardStats
 );
 
@@ -31,9 +31,20 @@ router.get('/dashboard',
  */
 router.get('/users',
   authenticate,
-  authorize('admin', 'super_admin'),
+  authorize('admin'),
   validate(schemas.admin.listUsers, 'query'),
   AdminController.getAllUsers
+);
+
+/**
+ * @route   GET /api/admin/users/:id
+ * @desc    Get single user with stats
+ * @access  Admin
+ */
+router.get('/users/:id',
+  authenticate,
+  authorize('admin'),
+  AdminController.getUser
 );
 
 /**
@@ -43,7 +54,7 @@ router.get('/users',
  */
 router.put('/users/:id/status',
   authenticate,
-  authorize('admin', 'super_admin'),
+  authorize('admin'),
   validate(schemas.common.params.id, 'params'),
   validate(schemas.admin.updateUserStatus),
   AdminController.updateUserStatus
@@ -56,7 +67,7 @@ router.put('/users/:id/status',
  */
 router.put('/users/:id/role',
   authenticate,
-  authorize('admin', 'super_admin'),
+  authorize('admin'),
   validate(schemas.common.params.id, 'params'),
   validate(schemas.admin.updateUserRole),
   AdminController.updateUserRole
@@ -69,7 +80,7 @@ router.put('/users/:id/role',
  */
 router.delete('/users/:id',
   authenticate,
-  authorize('admin', 'super_admin'),
+  authorize('admin'),
   validate(schemas.common.params.id, 'params'),
   AdminController.deleteUser
 );
@@ -85,7 +96,7 @@ router.delete('/users/:id',
  */
 router.get('/reports',
   authenticate,
-  authorize('admin', 'super_admin'),
+  authorize('admin'),
   validate(schemas.admin.listReports, 'query'),
   AdminController.getReports
 );
@@ -97,7 +108,7 @@ router.get('/reports',
  */
 router.post('/reports/:id/resolve',
   authenticate,
-  authorize('admin', 'super_admin'),
+  authorize('admin'),
   validate(schemas.common.params.id, 'params'),
   validate(schemas.admin.resolveReport),
   AdminController.resolveReport
@@ -110,7 +121,7 @@ router.post('/reports/:id/resolve',
  */
 router.post('/reports/:id/dismiss',
   authenticate,
-  authorize('admin', 'super_admin'),
+  authorize('admin'),
   validate(schemas.common.params.id, 'params'),
   AdminController.dismissReport
 );
@@ -126,9 +137,53 @@ router.post('/reports/:id/dismiss',
  */
 router.get('/moderation-history',
   authenticate,
-  authorize('admin', 'super_admin'),
+  authorize('admin'),
   validate(schemas.admin.moderationHistory, 'query'),
   AdminController.getModerationHistory
+);
+
+/**
+ * @route   GET /api/admin/system-info
+ * @desc    Get system health and configuration info
+ * @access  Admin
+ */
+router.get('/system-info',
+  authenticate,
+  authorize('admin'),
+  AdminController.getSystemInfo
+);
+
+/**
+ * @route   GET /api/admin/discussion-stats
+ * @desc    Get discussion stats
+ * @access  Admin
+ */
+router.get('/discussion-stats',
+  authenticate,
+  authorize('admin'),
+  AdminController.getDiscussionStats
+);
+
+/**
+ * @route   GET /api/admin/categories-tags
+ * @desc    Get categories and tags overview
+ * @access  Admin
+ */
+router.get('/categories-tags',
+  authenticate,
+  authorize('admin'),
+  AdminController.getCategoriesAndTags
+);
+
+/**
+ * @route   GET /api/admin/analytics
+ * @desc    Get analytics data for a time range
+ * @access  Admin
+ */
+router.get('/analytics',
+  authenticate,
+  authorize('admin'),
+  AdminController.getAnalytics
 );
 
 module.exports = router;

@@ -103,60 +103,55 @@ router.delete('/me/account',
  * @desc    Follow a user
  * @access  Private
  */
-// TEMPORARILY DISABLED - missing method
-// router.post('/:userId/follow',
-//   authenticate,
-//   validate(schemas.common.params.userId, 'params'),
-//   UserController.followUser
-// );
+router.post('/:userId/follow',
+  authenticate,
+  validate(schemas.common.params.userId, 'params'),
+  UserController.followUser
+);
 
 /**
  * @route   DELETE /api/users/:userId/follow
  * @desc    Unfollow a user
  * @access  Private
  */
-// TEMPORARILY DISABLED - missing method
-// router.delete('/:userId/follow',
-//   authenticate,
-//   validate(schemas.common.params.userId, 'params'),
-//   UserController.unfollowUser
-// );
+router.delete('/:userId/follow',
+  authenticate,
+  validate(schemas.common.params.userId, 'params'),
+  UserController.unfollowUser
+);
 
 /**
  * @route   GET /api/users/:userId/follow-info
  * @desc    Get follow information for a user
  * @access  Private
  */
-// TEMPORARILY DISABLED - missing method
-// router.get('/:userId/follow-info',
-//   authenticate,
-//   validate(schemas.common.params.userId, 'params'),
-//   UserController.getFollowInfo
-// );
+router.get('/:userId/follow-info',
+  authenticate,
+  validate(schemas.common.params.userId, 'params'),
+  UserController.getFollowInfo
+);
 
 /**
  * @route   GET /api/users/:userId/followers
  * @desc    Get user's followers list
  * @access  Public
  */
-// TEMPORARILY DISABLED - missing method
-// router.get('/:userId/followers',
-//   validate(schemas.common.params.userId, 'params'),
-//   validate(schemas.user.getUserFollowers, 'query'),
-//   UserController.getUserFollowers
-// );
+router.get('/:userId/followers',
+  validate(schemas.common.params.userId, 'params'),
+  validate(schemas.user.getUserFollowers, 'query'),
+  UserController.getUserFollowers
+);
 
 /**
  * @route   GET /api/users/:userId/following
  * @desc    Get user's following list
  * @access  Public
  */
-// TEMPORARILY DISABLED - missing method
-// router.get('/:userId/following',
-//   validate(schemas.common.params.userId, 'params'),
-//   validate(schemas.user.getUserFollowing, 'query'),
-//   UserController.getUserFollowing
-// );
+router.get('/:userId/following',
+  validate(schemas.common.params.userId, 'params'),
+  validate(schemas.user.getUserFollowing, 'query'),
+  UserController.getUserFollowing
+);
 
 // ============================================
 // Public Routes with Dynamic Parameters
@@ -193,7 +188,7 @@ router.get('/:userId/statistics',
  */
 router.put('/:userId/role',
   authenticate,
-  authorize('admin', 'super_admin'),
+  authorize('admin'),
   validate(schemas.common.params.userId, 'params'),
   validate(schemas.user.updateRole),
   UserController.updateUserRole
@@ -206,7 +201,7 @@ router.put('/:userId/role',
  */
 router.delete('/:userId',
   authenticate,
-  authorize('admin', 'super_admin'),
+  authorize('admin'),
   validate(schemas.common.params.userId, 'params'),
   UserController.deleteAccount
 );
