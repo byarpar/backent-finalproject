@@ -1,11 +1,11 @@
-# A Modern Discussion Forum — Backend API
+# A Modern Discussion Forum (AMDF) - Backend API
 
-> **Final Year Project** — BSc Computer Science
+> Final Year Project - BSc Computer Science
 
-| Presenter | Student ID | Role |
-|-----------|------------|------|
-| Yuya Moe Thet | THE24639283 | Security & Backend Development |
-| Byar Par | PAR24639286 | Front & Backend Development |
+| Name | Student ID | Role |
+|------|------------|------|
+| Yuya Moe Thet | THE24639283 | Security - Fail2Ban Brute Force Protection |
+| Byar Par | PAR24639286 | Full Stack Development |
 
 [![Node.js](https://img.shields.io/badge/Node.js-18_LTS-green.svg)](https://nodejs.org/)
 [![PostgreSQL](https://img.shields.io/badge/PostgreSQL-14+-blue.svg)](https://www.postgresql.org/)
@@ -14,55 +14,27 @@
 
 ---
 
-## Problem Statement
-
-Developer communities are scattered across multiple platforms, making it difficult to find reliable programming discussions in one place. Many existing forums have outdated interfaces and poor user experience. Additionally, login systems are vulnerable to brute force attacks where attackers repeatedly try passwords, putting user accounts at risk.
-
-**Who benefits:** Developers · Computer Science Students · Tech Communities · Website Administrators
-
----
-
-## Project Aim
-
-To develop a modern and secure online discussion forum where developers can share knowledge, ask questions, and collaborate safely.
-
-### Objectives
-
-- Develop a responsive web forum using modern technologies
-- Implement user registration and login authentication
-- Enable users to create and interact with discussion posts
-- Provide Google OAuth login functionality
-- Protect the login system using Fail2Ban to prevent brute force attacks
-- Monitor and block malicious IP addresses automatically
-
----
-
-## Role Allocation
-
-**Yuya Moe Thet (THE24639283) — Security & Backend Development**
-- Configure Fail2Ban for brute force protection
-- Setup and manage server security
-- Assist with backend API development
-
-**Byar Par (PAR24639286) — Front & Backend Development**
-- Develop user interface using React.js
-- Design responsive layout with Tailwind CSS
-- Implement login and forum pages
-- Connect frontend to backend APIs
-
----
-
 ## Overview
 
-**A Modern Discussion Forum** provides a centralized platform for developers to share knowledge with a secure, modern interface. The backend is a four-layer REST API that addresses key security concerns:
+AMDF backend is an Express + PostgreSQL REST API that powers authentication, discussions, answers, admin moderation, notifications, and direct messaging. The architecture follows a layered flow:
 
-- **Brute force protection** — Fail2Ban monitors SSH and web server logs, automatically blocking malicious IP addresses after repeated failed login attempts
-- **JWT revocation** — Hybrid JWT + live DB query on every protected request closes the standard JWT revocation gap; deactivated accounts are rejected immediately
-- **Soft-deletion with anonymisation** — `account_status = 'anonymized'` preserves thread integrity while replacing all PII
+Request -> Routes -> Controllers -> Services -> Repositories -> PostgreSQL
 
-**Architecture:** Four-layer REST API — Routes → Controllers → Services → Repositories → PostgreSQL
+The system uses JWT-based authentication, optional Google OAuth, Joi input validation, role-based authorization, and audit logging. Email delivery for verification and password reset is handled by Mandrill HTTP API (primary) with SMTP-capable fallback providers in the email service.
 
-**Tech stack:** Node.js 18 LTS · Express 4.18 · PostgreSQL 14+ · Passport.js · JWT · Joi 17.9 · Helmet.js 7.2 · Winston 3.17 · Nodemailer 7.0 · DOMPurify 3.3 · bcrypt (cost 12) · Fail2Ban
+---
+
+## Tech Stack
+
+- Runtime: Node.js 18+
+- Framework: Express 4.18
+- Database: PostgreSQL 14+ (`pg`)
+- Auth: JWT, Passport Google OAuth 2.0
+- Validation: Joi
+- Security: Helmet, CORS policy, bcrypt, Fail2Ban
+- Logging: Winston + Morgan
+- File handling: Multer
+- Email: Axios (Mandrill HTTP API), Nodemailer (SMTP transports)
 
 ---
 
@@ -76,270 +48,229 @@ To develop a modern and secure online discussion forum where developers can shar
 ### Installation
 
 ```bash
-git clone https://github.com/byarpar/backent-finalproject.git
-cd backent-finalproject
+cd backend
 npm install
-cp .env.example .env   # configure environment variables
+cp .env.example .env
 node src/config/databaseInitializer.js
 npm run dev
 ```
 
-### Environment Variables
+Default server URL: `http://localhost:3001`
 
-Create a `.env` file in the project root:
+### Scripts
 
-```env
-# Server
-NODE_ENV=development
-PORT=5000
-
-# Database
-DB_HOST=localhost
-DB_PORT=5432
-DB_NAME=devforum
-DB_USER=your_db_user
-DB_PASSWORD=your_db_password
-
-# JWT
-JWT_SECRET=your_jwt_secret_min_32_chars
-JWT_EXPIRES_IN=7d
-REFRESH_TOKEN_SECRET=your_refresh_token_secret
-REFRESH_TOKEN_EXPIRES_IN=30d
-
-# Google OAuth
-GOOGLE_CLIENT_ID=your_google_client_id
-GOOGLE_CLIENT_SECRET=your_google_client_secret
-GOOGLE_CALLBACK_URL=http://localhost:5000/api/auth/google/callback
-
-# Email (supports gmail / outlook / sendgrid / ses / smtp)
-EMAIL_HOST=smtp.gmail.com
-EMAIL_PORT=587
-EMAIL_USER=your_email@gmail.com
-EMAIL_PASSWORD=your_app_password
-EMAIL_FROM=A Modern Discussion Forum <noreply@moderndiscussionforum.com>
-
-# Frontend
-FRONTEND_URL=http://localhost:3000
-
-# Session
-SESSION_SECRET=your_session_secret
+```bash
+npm start      # node src/server.js
+npm run dev    # nodemon src/server.js
 ```
-
-> Generate secure secrets: `node -e "console.log(require('crypto').randomBytes(64).toString('hex'))"`
 
 ---
 
-## Architecture
+## Environment Variables
 
-### Four-Layer Design
+```env
+NODE_ENV=development
+PORT=3001
+FRONTEND_URL=http://localhost:3000
 
+DB_HOST=localhost
+DB_PORT=5432
+DB_NAME=your_db_name
+DB_USER=your_db_user
+DB_PASSWORD=your_db_password
+
+JWT_SECRET=your_jwt_secret
+JWT_EXPIRE=7d
+SESSION_SECRET=your_session_secret
+BCRYPT_ROUNDS=12
+
+GOOGLE_CLIENT_ID=your_google_client_id
+GOOGLE_CLIENT_SECRET=your_google_client_secret
+GOOGLE_CALLBACK_URL=http://localhost:3001/api/auth/google/callback
+
+EMAIL_PROVIDER=mandrill
+SMTP_USER=your_mandrill_api_key
+SMTP_PASSWORD=your_mandrill_api_key
+EMAIL_FROM=noreply@yourdomain.com
+EMAIL_SENDER_NAME=A Modern Discussion Forum (AMDF)
+
+ENABLE_EMAIL_VERIFICATION=true
+ENABLE_GOOGLE_AUTH=true
+ENABLE_CHAT=true
+ENABLE_DISCUSSIONS=true
 ```
-Request → Routes → Controllers → Services → Repositories → PostgreSQL
-```
 
-| Layer | Responsibility |
-|-------|---------------|
-| **Routes** | Endpoint definitions, middleware attachment, Joi validation |
-| **Controllers** | HTTP input parsing, response formatting |
-| **Services** | Business logic, authorization, `extractMentions()` pipeline |
-| **Repositories** | All DB queries via parameterized statements; `BaseRepository` extended by domain repos |
+---
 
-### Key Design Decisions
+## Actual Database Schema (from databaseInitializer.js)
 
-| Decision | Problem Solved |
-|----------|---------------|
-| Hybrid JWT + live DB verify on every request | Closes JWT revocation gap — deactivated accounts rejected immediately |
-| `account_status = 'anonymized'` soft-deletion | Preserves thread integrity; replaces PII while keeping content |
-| JSONB single-level nested replies | Bounded reply depth; `parent_answer_id` validated against same discussion |
-| Vote count separated from best-answer designation | Eliminates first-mover acceptance bias |
-| `normalizeImages()` / `normalizeAnswerImages()` hooks | Handles images stored as string, array, or JSONB uniformly |
-| `emailService.js` multi-provider support | `gmail`, `outlook`, `sendgrid`, `ses`, `smtp`; console fallback in dev |
+Core platform tables:
+
+- `users`
+- `discussions`
+- `discussion_votes`
+- `answers`
+- `answer_votes`
+- `notifications`
+- `conversations`
+- `messages`
+- `audit_logs`
+
+Dictionary/legacy domain tables also initialized in the same DB setup:
+
+- `words`
+- `tags`
+- `word_categories`
+- `word_category_mappings`
+- `etymology`
+- `user_favorites`
+- `search_history`
+
+Notes:
+
+- UUID support via `uuid-ossp` extension.
+- `updated_at` triggers are created for multiple tables.
+- Role/account status checks and composite unique constraints are used (for example votes, favorites, conversations).
+
+---
+
+## API Routes
+
+Base API prefix: `/api`
+
+### Health and Root
+
+- `GET /health` - API health (this is the correct health endpoint)
+- `GET /` - API info payload
+
+### Auth (`/api/auth`)
+
+- Registration/login/password reset/email verification
+- Token verify and refresh
+- Google OAuth login + account link/unlink
+- Account restore and deletion status check
+
+Examples:
+
+- `POST /api/auth/register`
+- `POST /api/auth/login`
+- `POST /api/auth/forgot-password`
+- `POST /api/auth/reset-password`
+- `POST /api/auth/verify-email`
+- `POST /api/auth/resend-verification`
+- `POST /api/auth/refresh`
+- `POST /api/auth/logout`
+- `GET /api/auth/google`
+- `GET /api/auth/google/callback`
+
+### Users (`/api/users`)
+
+- Public user listing/search/profile access
+- Own profile updates
+- Follow/unfollow and follow relationships
+- Admin role updates/deletion
+
+Examples:
+
+- `GET /api/users`
+- `GET /api/users/search`
+- `GET /api/users/mention-suggestions`
+- `GET /api/users/me/profile`
+- `PUT /api/users/me/profile`
+- `DELETE /api/users/me/account`
+- `POST /api/users/:userId/follow`
+- `DELETE /api/users/:userId/follow`
+
+### Discussions (`/api/discussions`)
+
+- Discussion CRUD
+- Voting, save/unsave, solve/unsolve
+- Pin/unpin, lock/unlock (moderator/admin)
+- Reporting and related discussions
+
+### Answers (`/api/answers`)
+
+- Answer CRUD
+- Voting/remove vote
+- Answer listing by discussion
+
+### Admin (`/api/admin`)
+
+All admin routes require `authenticate + authorize('admin')`.
+
+- Dashboard metrics
+- User moderation
+- Reports resolve/dismiss
+- Analytics, moderation history, system info
+
+### Messages (`/api/messages`)
+
+Authenticated messaging endpoints:
+
+- conversations list/get-or-create
+- message list/send/delete
+
+### Notifications (`/api/notifications`)
+
+Authenticated notification endpoints:
+
+- list
+- mark read / mark all read
+- delete
+
+---
+
+## Middleware and Security
+
+Global middleware in `src/app.js`:
+
+- Helmet
+- Dynamic CORS (env origins + tunnel/local handling)
+- JSON/urlencoded parsers (10 MB)
+- Session + Passport initialize/session
+- Winston request logger
+- Morgan in dev mode
+- Static uploads serving
+- API not-found handler + global error handler
+
+Auth middleware from `src/middlewares/index.js`:
+
+- `authenticate`
+- `optionalAuth`
+- `authorize(...roles)`
+- Multer upload middleware (image-only, size/count limits)
+- Audit logging helper middleware
+
+Security controls:
+
+- Parameterized DB queries
+- Bcrypt password hashing
+- JWT verification + active user checks
+- Role-based access checks
+- Validation with Joi schemas
+- Fail2Ban for brute-force login attempts
 
 ---
 
 ## Project Structure
 
-```
+```text
 backend/
-├── src/
-│   ├── config/
-│   │   ├── database.js             # PostgreSQL connection pool (pg 8.11)
-│   │   ├── databaseInitializer.js  # Auto-provisions all 8 tables + indexes
-│   │   ├── index.js
-│   │   └── passport.js             # Google OAuth — server-side code exchange
-│   ├── controllers/                # HTTP handlers
-│   │   ├── adminController.js
-│   │   ├── answerController.js
-│   │   ├── authController.js
-│   │   ├── discussionController.js
-│   │   ├── notificationController.js
-│   │   └── userController.js
-│   ├── services/                   # Business logic
-│   │   ├── adminService.js
-│   │   ├── answerService.js
-│   │   ├── authService.js
-│   │   ├── discussionService.js
-│   │   ├── emailService.js
-│   │   └── userService.js
-│   ├── repositories/               # Data access layer
-│   │   ├── BaseRepository.js
-│   │   ├── AdminRepository.js
-│   │   ├── AnswerRepository.js
-│   │   ├── DiscussionRepository.js
-│   │   └── UserRepository.js
-│   ├── routes/
-│   │   ├── index.js
-│   │   ├── auth.js
-│   │   ├── users.js
-│   │   ├── discussions.js
-│   │   ├── answers.js
-│   │   └── admin.js
-│   ├── middlewares/index.js        # authenticate(), authorize(), error handler
-│   ├── validations/schemas.js      # Joi schemas — stripUnknown: true
-│   ├── utils/
-│   │   ├── helpers.js              # sendSuccess / sendError utilities
-│   │   ├── logger.js               # Winston — file + console transports
-│   │   └── mentionUtils.js         # extractMentions() + normalizeMentions()
-│   ├── app.js
-│   └── server.js                   # Graceful SIGTERM/SIGINT shutdown
-├── uploads/
-├── logs/
-└── package.json
+  src/
+    app.js
+    server.js
+    config/
+    controllers/
+    middlewares/
+    repositories/
+    routes/
+    services/
+    utils/
+    validations/
+  uploads/
+  logs/
+  package.json
 ```
-
----
-
-## Database Schema
-
-8 tables, auto-provisioned by `databaseInitializer.js`:
-
-| Table | Primary Key | Notable Columns |
-|-------|------------|-----------------|
-| `users` | UUID `uuid_generate_v4()` | `role CHECK`, `account_status CHECK`, `email_verified`, `deleted_at TIMESTAMPTZ` |
-| `discussions` | SERIAL INT | `tags TEXT[]`, `images JSONB`, `is_pinned`, `is_locked`, `category` (22 options) |
-| `answers` | SERIAL INT | `replies JSONB`, `is_best_answer`, `vote_count` |
-| `notifications` | SERIAL INT | `type`, `data JSONB`, `is_read` |
-| `audit_logs` | SERIAL INT | `old_values JSONB`, `new_values JSONB`, `ip_address` |
-
-Indexed on: `email`, `username`, `category`, `author_id`, `discussion_id`
-
----
-
-## API Endpoints
-
-### Authentication — `/api/auth`
-
-| Method | Path | Description | Auth |
-|--------|------|-------------|------|
-| POST | `/register` | Register new user | Public |
-| POST | `/login` | Login, receive JWT | Public |
-| GET | `/google` | Google OAuth (server-side exchange) | Public |
-| GET | `/google/callback` | Google OAuth callback | Public |
-| POST | `/forgot-password` | Request password reset email | Public |
-| POST | `/reset-password` | Reset password with token | Public |
-| POST | `/verify-email` | Verify email address | Public |
-| POST | `/resend-verification` | Resend verification email | Public |
-| POST | `/restore-account` | Restore soft-deleted account (30-day grace) | Public |
-| POST | `/logout` | Logout and invalidate token | Private |
-| POST | `/refresh-token` | Refresh access token | Private |
-
-JWT error codes: `TOKEN_EXPIRED` · `INVALID_TOKEN` · `ACCOUNT_DEACTIVATED` · `EMAIL_NOT_VERIFIED`
-
-### Users — `/api/users`
-
-| Method | Path | Description | Auth |
-|--------|------|-------------|------|
-| GET | `/` | List users (paginated) | Public |
-| GET | `/search` | Search users | Public |
-| GET | `/mention-suggestions` | `@mention` autocomplete | Public |
-| GET | `/me/profile` | Get own profile | Private |
-| PUT | `/me/profile` | Update own profile | Private |
-| PUT | `/me/password` | Change password | Private |
-| DELETE | `/me` | Soft-delete own account | Private |
-| GET | `/:userId` | Get user profile by ID | Public |
-
-### Discussions — `/api/discussions`
-
-| Method | Path | Description | Auth |
-|--------|------|-------------|------|
-| GET | `/` | List discussions (paginated, filtered) | Public |
-| GET | `/categories` | Get all 22 categories | Public |
-| GET | `/user/saved` | Get saved discussions | Private |
-| GET | `/:id` | Get discussion by ID | Public |
-| GET | `/:id/related` | Get related discussions | Public |
-| POST | `/` | Create discussion | Private |
-| PUT | `/:id` | Update discussion | Private |
-| DELETE | `/:id` | Delete discussion | Private |
-| POST | `/:id/vote` | Vote on discussion | Private |
-| POST | `/:id/save` | Save/unsave discussion | Private |
-| POST | `/:id/view` | Record view | Public |
-| POST | `/upload-image` | Upload inline image | Private |
-
-### Answers — `/api/answers`
-
-| Method | Path | Description | Auth |
-|--------|------|-------------|------|
-| GET | `/discussion/:discussionId` | Get answers for discussion | Public |
-| POST | `/discussion/:discussionId` | Post answer | Private |
-| PUT | `/:id` | Update answer | Private |
-| DELETE | `/:id` | Delete answer | Private |
-| POST | `/:id/vote` | Vote on answer | Private |
-| POST | `/:id/best` | Mark best answer (author only) | Private |
-
-### Admin — `/api/admin`
-
-| Method | Path | Description | Auth |
-|--------|------|-------------|------|
-| GET | `/dashboard` | Dashboard statistics | Admin |
-| GET | `/users` | List all users | Admin |
-| PUT | `/users/:id/status` | Update user status | Admin |
-| PUT | `/users/:id/role` | Update user role | Admin |
-| DELETE | `/users/:id` | Delete user | Admin |
-| GET | `/reports` | List reported content | Admin |
-| PUT | `/reports/:id` | Resolve report | Admin |
-| GET | `/analytics` | Platform analytics | Admin |
-| POST | `/import` | Import data (CSV/Excel) | Admin |
-
-### Health Check
-
-```
-GET /api/health
-```
-
----
-
-## Security
-
-Evaluated against OWASP Top 10:
-
-| Control | Implementation |
-|---------|---------------|
-| SQL Injection (A03) | Parameterized queries via `pg`; no string interpolation |
-| XSS (A03) | DOMPurify 3.3.0 on all rendered content |
-| Broken Auth (A07) | JWT + live DB verify; bcrypt cost 12; email verification required |
-| Security Misconfiguration (A05) | Helmet.js 7.2 — CSP, HSTS, X-Frame-Options |
-| Broken Access Control (A01) | `authorize()` middleware; role CHECK constraint in DB |
-| GDPR / Data Minimisation | Soft-deletion anonymisation; `deleted_at` + `account_status` |
-
-Roles: `user` · `moderator` · `admin` · `super_admin`
-
----
-
-## Scripts
-
-```bash
-npm start      # production
-npm run dev    # development with nodemon
-```
-
----
-
-## Testing
-
-22 functional test cases covering all user journeys:
-- Guest: register, login, email verify, browse, forgot/reset password
-- Registered user: create discussion, post answer, vote, @mention, notifications
-- Admin: user management, analytics, reports, audit logs
 
 ---
 
