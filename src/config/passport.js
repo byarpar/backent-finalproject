@@ -70,7 +70,9 @@ if (process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET) {
           const googleId = profile.id;
           const email = profile.emails[0]?.value;
           const fullName = profile.displayName;
-          const profilePhoto = profile.photos[0]?.value;
+          // Get higher resolution Google profile photo (400px instead of default 96px)
+          const rawPhoto = profile.photos[0]?.value;
+          const profilePhoto = rawPhoto ? rawPhoto.replace(/=s\d+-c$/, '=s400-c') : null;
           const givenName = profile.name?.givenName;
           const familyName = profile.name?.familyName;
 

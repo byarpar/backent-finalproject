@@ -26,7 +26,11 @@ class DatabaseInitializer {
         await this.createAdminUser();
         logger.info('Admin user created successfully');
       } else {
-        logger.info('Database tables already exist, skipping initialization');
+        logger.info('Database tables already exist, running migrations...');
+
+        // Always run migrations to add missing tables/columns on existing DBs
+        await this.runMigrations();
+        logger.info('Migrations completed');
 
         // Check if admin user exists, create if not
         const adminExists = await this.checkAdminExists();
@@ -42,6 +46,231 @@ class DatabaseInitializer {
     } catch (error) {
       logger.error('Database initialization failed:', error);
       throw error;
+    }
+  }
+
+  /**
+   * Run incremental migrations for existing databases.
+   * All statements use IF NOT EXISTS / DO NOTHING so they are idempotent.
+   */
+  async runMigrations() {
+    const client = await this.pool.connect();
+    try {
+      await client.query('BEGIN');
+      await client.query('CREATE EXTENSION IF NOT EXISTS "uuid-ossp"');
+
+      // ── users table: fix nullable password_hash, add missing columns ──────
+      await client.query(`
+        ALTER TABLE users
+          ALTER COLUMN password_hash DROP NOT NULL
+      `).catch(() => { }); // already nullable → ignore
+
+      await client.query(`
+        ALTER TABLE users ADD COLUMN IF NOT EXISTS online_status VARCHAR(20) DEFAULT 'offline'
+      `);
+      await client.query(`
+        ALTER TABLE users ADD COLUMN IF NOT EXISTS google_id VARCHAR(255)
+      `);
+      await client.query(`
+        ALTER TABLE users ADD COLUMN IF NOT EXISTS oauth_provider VARCHAR(50)
+      `);
+      await client.query(`
+        ALTER TABLE users ADD COLUMN IF NOT EXISTS account_status VARCHAR(50) DEFAULT 'active'
+          CHECK (account_status IN ('active','pending_deletion','anonymized'))
+      `).catch(() => { });
+      await client.query(`
+        ALTER TABLE users ADD COLUMN IF NOT EXISTS email_verification_code VARCHAR(10)
+      `);
+      await client.query(`
+        ALTER TABLE users ADD COLUMN IF NOT EXISTS email_verification_expires TIMESTAMP WITH TIME ZONE
+      `);
+
+      // Unique constraint on google_id (safe to add if not there)
+      await client.query(`
+        DO $$ BEGIN
+          ALTER TABLE users ADD CONSTRAINT users_google_id_key UNIQUE (google_id);
+        EXCEPTION WHEN duplicate_table THEN NULL;
+        END $$
+      `);
+
+      // ── answers ────────────────────────────────────────────────────────────
+      await client.query(`
+        CREATE TABLE IF NOT EXISTS answers (
+          id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+          discussion_id INTEGER REFERENCES discussions(id) ON DELETE CASCADE,
+          author_id UUID REFERENCES users(id) ON DELETE SET NULL,
+          content TEXT NOT NULL,
+          images JSONB DEFAULT '[]',
+          replies JSONB DEFAULT '[]',
+          reply_count INTEGER DEFAULT 0,
+          vote_count INTEGER DEFAULT 0,
+          upvotes INTEGER DEFAULT 0,
+          downvotes INTEGER DEFAULT 0,
+          created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+          updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+        )
+      `);
+
+      // ── answer_votes ───────────────────────────────────────────────────────
+      await client.query(`
+        CREATE TABLE IF NOT EXISTS answer_votes (
+          answer_id UUID REFERENCES answers(id) ON DELETE CASCADE,
+          user_id UUID REFERENCES users(id) ON DELETE CASCADE,
+          vote_type VARCHAR(10) NOT NULL CHECK (vote_type IN ('up','down')),
+          created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+          PRIMARY KEY (answer_id, user_id)
+        )
+      `);
+
+      // ── discussion_votes ───────────────────────────────────────────────────
+      await client.query(`
+        CREATE TABLE IF NOT EXISTS discussion_votes (
+          discussion_id INTEGER REFERENCES discussions(id) ON DELETE CASCADE,
+          user_id UUID REFERENCES users(id) ON DELETE CASCADE,
+          vote_type VARCHAR(10) NOT NULL CHECK (vote_type IN ('up','down')),
+          created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+          PRIMARY KEY (discussion_id, user_id)
+        )
+      `);
+
+      // ── conversations ──────────────────────────────────────────────────────
+      await client.query(`
+        CREATE TABLE IF NOT EXISTS conversations (
+          id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+          participant1_id UUID REFERENCES users(id) ON DELETE CASCADE,
+          participant2_id UUID REFERENCES users(id) ON DELETE CASCADE,
+          last_message_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+          created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+          UNIQUE (participant1_id, participant2_id)
+        )
+      `);
+
+      // ── messages ───────────────────────────────────────────────────────────
+      await client.query(`
+        CREATE TABLE IF NOT EXISTS messages (
+          id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+          conversation_id UUID REFERENCES conversations(id) ON DELETE CASCADE,
+          sender_id UUID REFERENCES users(id) ON DELETE SET NULL,
+          content TEXT NOT NULL,
+          is_read BOOLEAN DEFAULT false,
+          created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+        )
+      `);
+
+      // ── notifications ──────────────────────────────────────────────────────
+      await client.query(`
+        CREATE TABLE IF NOT EXISTS notifications (
+          id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+          user_id UUID REFERENCES users(id) ON DELETE CASCADE,
+          type VARCHAR(50) NOT NULL DEFAULT 'system',
+          title TEXT,
+          message TEXT,
+          related_id UUID,
+          related_type VARCHAR(50),
+          is_read BOOLEAN DEFAULT false,
+          created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+        )
+      `);
+
+      // ── search_history ─────────────────────────────────────────────────────
+      await client.query(`
+        CREATE TABLE IF NOT EXISTS search_history (
+          id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+          user_id UUID REFERENCES users(id) ON DELETE CASCADE,
+          query TEXT NOT NULL,
+          created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+        )
+      `);
+
+      // ── words (dictionary core table) ──────────────────────────────────────
+      await client.query(`
+        CREATE TABLE IF NOT EXISTS words (
+          id SERIAL PRIMARY KEY,
+          english VARCHAR(500) NOT NULL,
+          lisu VARCHAR(500),
+          part_of_speech VARCHAR(100),
+          definition TEXT,
+          example_sentence TEXT,
+          created_by UUID REFERENCES users(id) ON DELETE SET NULL,
+          created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+          updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+        )
+      `);
+
+      // ── word_categories ────────────────────────────────────────────────────
+      await client.query(`
+        CREATE TABLE IF NOT EXISTS word_categories (
+          id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+          name VARCHAR(100) UNIQUE NOT NULL,
+          description TEXT,
+          created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+        )
+      `);
+
+      // ── word_category_mappings ─────────────────────────────────────────────
+      await client.query(`
+        CREATE TABLE IF NOT EXISTS word_category_mappings (
+          word_id INTEGER REFERENCES words(id) ON DELETE CASCADE,
+          category_id UUID REFERENCES word_categories(id) ON DELETE CASCADE,
+          PRIMARY KEY (word_id, category_id)
+        )
+      `);
+
+      // ── etymology ──────────────────────────────────────────────────────────
+      await client.query(`
+        CREATE TABLE IF NOT EXISTS etymology (
+          id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+          word_id INTEGER REFERENCES words(id) ON DELETE CASCADE,
+          origin_language VARCHAR(100),
+          origin_word VARCHAR(500),
+          description TEXT,
+          created_by UUID REFERENCES users(id) ON DELETE SET NULL,
+          created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+          updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+        )
+      `);
+
+      // ── missing indexes (idempotent) ────────────────────────────────────────
+      const idxStatements = [
+        `CREATE INDEX IF NOT EXISTS idx_answers_discussion ON answers(discussion_id)`,
+        `CREATE INDEX IF NOT EXISTS idx_answers_author ON answers(author_id)`,
+        `CREATE INDEX IF NOT EXISTS idx_answer_votes_answer ON answer_votes(answer_id)`,
+        `CREATE INDEX IF NOT EXISTS idx_discussion_votes_discussion ON discussion_votes(discussion_id)`,
+        `CREATE INDEX IF NOT EXISTS idx_conversations_p1 ON conversations(participant1_id)`,
+        `CREATE INDEX IF NOT EXISTS idx_conversations_p2 ON conversations(participant2_id)`,
+        `CREATE INDEX IF NOT EXISTS idx_messages_conversation ON messages(conversation_id)`,
+        `CREATE INDEX IF NOT EXISTS idx_messages_sender ON messages(sender_id)`,
+        `CREATE INDEX IF NOT EXISTS idx_notifications_user ON notifications(user_id)`,
+        `CREATE INDEX IF NOT EXISTS idx_notifications_read ON notifications(user_id, is_read)`,
+        `CREATE INDEX IF NOT EXISTS idx_search_history_user ON search_history(user_id)`,
+        `CREATE INDEX IF NOT EXISTS idx_words_english ON words USING gin(to_tsvector('english', english))`,
+        `CREATE INDEX IF NOT EXISTS idx_words_lisu ON words USING gin(to_tsvector('english', COALESCE(lisu, '')))`,
+      ];
+      for (const stmt of idxStatements) {
+        await client.query(stmt).catch(e => logger.warn(`Index migration warning: ${e.message}`));
+      }
+
+      // ── updated_at trigger on new tables ───────────────────────────────────
+      const triggerTables = ['answers', 'words', 'etymology'];
+      for (const tbl of triggerTables) {
+        await client.query(`
+          DO $$ BEGIN
+            CREATE TRIGGER update_${tbl}_updated_at
+              BEFORE UPDATE ON ${tbl}
+              FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+          EXCEPTION WHEN duplicate_object THEN NULL;
+          END $$
+        `).catch(e => logger.warn(`Trigger migration warning (${tbl}): ${e.message}`));
+      }
+
+      await client.query('COMMIT');
+      logger.info('Database migrations applied successfully');
+    } catch (error) {
+      await client.query('ROLLBACK');
+      logger.error('Migration failed:', error);
+      throw error;
+    } finally {
+      client.release();
     }
   }
 
@@ -113,22 +342,32 @@ class DatabaseInitializer {
       // Enable UUID extension
       await client.query('CREATE EXTENSION IF NOT EXISTS "uuid-ossp"');
 
-      // Drop existing tables if they exist (for development)
+      // Drop all tables in dependency order
       await client.query(`
         DROP TABLE IF EXISTS user_favorites CASCADE;
-        DROP TABLE IF EXISTS discussions CASCADE;
-        DROP TABLE IF EXISTS search_history CASCADE;
-        DROP TABLE IF EXISTS audit_logs CASCADE;
+        DROP TABLE IF EXISTS etymology CASCADE;
+        DROP TABLE IF EXISTS word_category_mappings CASCADE;
+        DROP TABLE IF EXISTS word_categories CASCADE;
         DROP TABLE IF EXISTS words CASCADE;
+        DROP TABLE IF EXISTS answer_votes CASCADE;
+        DROP TABLE IF EXISTS answers CASCADE;
+        DROP TABLE IF EXISTS discussion_votes CASCADE;
+        DROP TABLE IF EXISTS discussions CASCADE;
+        DROP TABLE IF EXISTS messages CASCADE;
+        DROP TABLE IF EXISTS conversations CASCADE;
+        DROP TABLE IF EXISTS notifications CASCADE;
+        DROP TABLE IF EXISTS search_history CASCADE;
+        DROP TABLE IF EXISTS tags CASCADE;
+        DROP TABLE IF EXISTS audit_logs CASCADE;
         DROP TABLE IF EXISTS users CASCADE;
       `);
 
-      // Create users table
+      // ── users ──────────────────────────────────────────────────────────────
       await client.query(`
         CREATE TABLE users (
           id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
           email VARCHAR(255) UNIQUE NOT NULL,
-          password_hash VARCHAR(255) NOT NULL,
+          password_hash VARCHAR(255),
           username VARCHAR(100) UNIQUE,
           full_name VARCHAR(200),
           role VARCHAR(20) DEFAULT 'user' CHECK (role IN ('user', 'admin', 'moderator')),
@@ -140,6 +379,7 @@ class DatabaseInitializer {
           bio TEXT,
           location VARCHAR(255),
           native_language VARCHAR(100),
+          online_status VARCHAR(20) DEFAULT 'offline',
           google_id VARCHAR(255) UNIQUE,
           oauth_provider VARCHAR(50),
           last_login TIMESTAMP WITH TIME ZONE,
@@ -150,14 +390,14 @@ class DatabaseInitializer {
         )
       `);
 
-      // Create discussions table
+      // ── discussions ────────────────────────────────────────────────────────
       await client.query(`
         CREATE TABLE discussions (
           id SERIAL PRIMARY KEY,
           title VARCHAR(255) NOT NULL,
           content TEXT NOT NULL,
           category VARCHAR(50) DEFAULT 'general' CHECK (category IN ('general','javascript','python','java','cpp','csharp','php','go','rust','other')),
-          author_id UUID REFERENCES users(id),
+          author_id UUID REFERENCES users(id) ON DELETE SET NULL,
           tags TEXT[] DEFAULT '{}',
           images JSONB,
           is_pinned BOOLEAN DEFAULT false,
@@ -173,7 +413,47 @@ class DatabaseInitializer {
         )
       `);
 
-      // Create tags table (source of truth for tag metadata)
+      // ── discussion_votes ───────────────────────────────────────────────────
+      await client.query(`
+        CREATE TABLE discussion_votes (
+          discussion_id INTEGER REFERENCES discussions(id) ON DELETE CASCADE,
+          user_id UUID REFERENCES users(id) ON DELETE CASCADE,
+          vote_type VARCHAR(10) NOT NULL CHECK (vote_type IN ('up','down')),
+          created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+          PRIMARY KEY (discussion_id, user_id)
+        )
+      `);
+
+      // ── answers ────────────────────────────────────────────────────────────
+      await client.query(`
+        CREATE TABLE answers (
+          id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+          discussion_id INTEGER REFERENCES discussions(id) ON DELETE CASCADE,
+          author_id UUID REFERENCES users(id) ON DELETE SET NULL,
+          content TEXT NOT NULL,
+          images JSONB DEFAULT '[]',
+          replies JSONB DEFAULT '[]',
+          reply_count INTEGER DEFAULT 0,
+          vote_count INTEGER DEFAULT 0,
+          upvotes INTEGER DEFAULT 0,
+          downvotes INTEGER DEFAULT 0,
+          created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+          updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+        )
+      `);
+
+      // ── answer_votes ───────────────────────────────────────────────────────
+      await client.query(`
+        CREATE TABLE answer_votes (
+          answer_id UUID REFERENCES answers(id) ON DELETE CASCADE,
+          user_id UUID REFERENCES users(id) ON DELETE CASCADE,
+          vote_type VARCHAR(10) NOT NULL CHECK (vote_type IN ('up','down')),
+          created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+          PRIMARY KEY (answer_id, user_id)
+        )
+      `);
+
+      // ── tags ───────────────────────────────────────────────────────────────
       await client.query(`
         CREATE TABLE tags (
           id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -184,7 +464,55 @@ class DatabaseInitializer {
         )
       `);
 
-      // Create user favorites table
+      // ── words ──────────────────────────────────────────────────────────────
+      await client.query(`
+        CREATE TABLE words (
+          id SERIAL PRIMARY KEY,
+          english VARCHAR(500) NOT NULL,
+          lisu VARCHAR(500),
+          part_of_speech VARCHAR(100),
+          definition TEXT,
+          example_sentence TEXT,
+          created_by UUID REFERENCES users(id) ON DELETE SET NULL,
+          created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+          updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+        )
+      `);
+
+      // ── word_categories ────────────────────────────────────────────────────
+      await client.query(`
+        CREATE TABLE word_categories (
+          id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+          name VARCHAR(100) UNIQUE NOT NULL,
+          description TEXT,
+          created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+        )
+      `);
+
+      // ── word_category_mappings ─────────────────────────────────────────────
+      await client.query(`
+        CREATE TABLE word_category_mappings (
+          word_id INTEGER REFERENCES words(id) ON DELETE CASCADE,
+          category_id UUID REFERENCES word_categories(id) ON DELETE CASCADE,
+          PRIMARY KEY (word_id, category_id)
+        )
+      `);
+
+      // ── etymology ──────────────────────────────────────────────────────────
+      await client.query(`
+        CREATE TABLE etymology (
+          id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+          word_id INTEGER REFERENCES words(id) ON DELETE CASCADE,
+          origin_language VARCHAR(100),
+          origin_word VARCHAR(500),
+          description TEXT,
+          created_by UUID REFERENCES users(id) ON DELETE SET NULL,
+          created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+          updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+        )
+      `);
+
+      // ── user_favorites ─────────────────────────────────────────────────────
       await client.query(`
         CREATE TABLE user_favorites (
           id SERIAL PRIMARY KEY,
@@ -195,14 +523,63 @@ class DatabaseInitializer {
         )
       `);
 
-      // Create audit logs table
+      // ── conversations ──────────────────────────────────────────────────────
+      await client.query(`
+        CREATE TABLE conversations (
+          id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+          participant1_id UUID REFERENCES users(id) ON DELETE CASCADE,
+          participant2_id UUID REFERENCES users(id) ON DELETE CASCADE,
+          last_message_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+          created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+          UNIQUE (participant1_id, participant2_id)
+        )
+      `);
+
+      // ── messages ───────────────────────────────────────────────────────────
+      await client.query(`
+        CREATE TABLE messages (
+          id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+          conversation_id UUID REFERENCES conversations(id) ON DELETE CASCADE,
+          sender_id UUID REFERENCES users(id) ON DELETE SET NULL,
+          content TEXT NOT NULL,
+          is_read BOOLEAN DEFAULT false,
+          created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+        )
+      `);
+
+      // ── notifications ──────────────────────────────────────────────────────
+      await client.query(`
+        CREATE TABLE notifications (
+          id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+          user_id UUID REFERENCES users(id) ON DELETE CASCADE,
+          type VARCHAR(50) NOT NULL DEFAULT 'system',
+          title TEXT,
+          message TEXT,
+          related_id UUID,
+          related_type VARCHAR(50),
+          is_read BOOLEAN DEFAULT false,
+          created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+        )
+      `);
+
+      // ── search_history ─────────────────────────────────────────────────────
+      await client.query(`
+        CREATE TABLE search_history (
+          id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+          user_id UUID REFERENCES users(id) ON DELETE CASCADE,
+          query TEXT NOT NULL,
+          created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+        )
+      `);
+
+      // ── audit_logs ─────────────────────────────────────────────────────────
       await client.query(`
         CREATE TABLE audit_logs (
           id SERIAL PRIMARY KEY,
           user_id UUID REFERENCES users(id),
           action VARCHAR(100) NOT NULL,
           table_name VARCHAR(100),
-          record_id INTEGER,
+          record_id VARCHAR(100),
           old_values JSONB,
           new_values JSONB,
           created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
@@ -223,48 +600,64 @@ class DatabaseInitializer {
   }
 
   async createIndexes(client) {
-    // Performance indexes
+    // Performance indexes (all use IF NOT EXISTS so they're idempotent)
     const indexes = [
-      'CREATE INDEX idx_users_email ON users(email)',
-      'CREATE INDEX idx_users_username ON users(username)',
-      'CREATE INDEX idx_users_role ON users(role)',
-      'CREATE INDEX idx_users_active ON users(is_active)',
+      'CREATE INDEX IF NOT EXISTS idx_users_email ON users(email)',
+      'CREATE INDEX IF NOT EXISTS idx_users_username ON users(username)',
+      'CREATE INDEX IF NOT EXISTS idx_users_role ON users(role)',
+      'CREATE INDEX IF NOT EXISTS idx_users_active ON users(is_active)',
+      'CREATE INDEX IF NOT EXISTS idx_users_google_id ON users(google_id)',
 
-      'CREATE INDEX idx_words_english ON words USING gin(to_tsvector(\'english\', english))',
-      'CREATE INDEX idx_words_lisu ON words USING gin(to_tsvector(\'english\', lisu))',
-      'CREATE INDEX idx_words_part_of_speech ON words(part_of_speech)',
-      'CREATE INDEX idx_words_created_by ON words(created_by)',
-      'CREATE INDEX idx_words_created_at ON words(created_at)',
+      'CREATE INDEX IF NOT EXISTS idx_discussions_category ON discussions(category)',
+      'CREATE INDEX IF NOT EXISTS idx_discussions_author ON discussions(author_id)',
+      'CREATE INDEX IF NOT EXISTS idx_discussions_created_at ON discussions(created_at)',
 
-      'CREATE INDEX idx_word_categories_name ON word_categories(name)',
-      'CREATE INDEX idx_word_category_mappings_word ON word_category_mappings(word_id)',
-      'CREATE INDEX idx_word_category_mappings_category ON word_category_mappings(category_id)',
+      'CREATE INDEX IF NOT EXISTS idx_answers_discussion ON answers(discussion_id)',
+      'CREATE INDEX IF NOT EXISTS idx_answers_author ON answers(author_id)',
 
-      'CREATE INDEX idx_etymology_word_id ON etymology(word_id)',
-      'CREATE INDEX idx_etymology_created_by ON etymology(created_by)',
+      'CREATE INDEX IF NOT EXISTS idx_answer_votes_answer ON answer_votes(answer_id)',
+      'CREATE INDEX IF NOT EXISTS idx_discussion_votes_discussion ON discussion_votes(discussion_id)',
 
-      'CREATE INDEX idx_discussions_category ON discussions(category)',
-      'CREATE INDEX idx_discussions_author ON discussions(author_id)',
-      'CREATE INDEX idx_discussions_created_at ON discussions(created_at)',
-      'CREATE INDEX idx_tags_slug ON tags(slug)',
-      'CREATE INDEX idx_tags_usage_count ON tags(usage_count)',
+      'CREATE INDEX IF NOT EXISTS idx_tags_slug ON tags(slug)',
+      'CREATE INDEX IF NOT EXISTS idx_tags_usage_count ON tags(usage_count)',
 
-      'CREATE INDEX idx_user_favorites_user ON user_favorites(user_id)',
-      'CREATE INDEX idx_user_favorites_word ON user_favorites(word_id)',
+      `CREATE INDEX IF NOT EXISTS idx_words_english ON words USING gin(to_tsvector('english', english))`,
+      `CREATE INDEX IF NOT EXISTS idx_words_lisu ON words USING gin(to_tsvector('english', COALESCE(lisu, '')))`,
+      'CREATE INDEX IF NOT EXISTS idx_words_part_of_speech ON words(part_of_speech)',
+      'CREATE INDEX IF NOT EXISTS idx_words_created_by ON words(created_by)',
+      'CREATE INDEX IF NOT EXISTS idx_words_created_at ON words(created_at)',
 
-      'CREATE INDEX idx_search_history_user_id ON search_history(user_id)',
-      'CREATE INDEX idx_search_history_created_at ON search_history(created_at)',
+      'CREATE INDEX IF NOT EXISTS idx_word_categories_name ON word_categories(name)',
+      'CREATE INDEX IF NOT EXISTS idx_word_category_mappings_word ON word_category_mappings(word_id)',
+      'CREATE INDEX IF NOT EXISTS idx_word_category_mappings_category ON word_category_mappings(category_id)',
 
-      'CREATE INDEX idx_audit_logs_user_id ON audit_logs(user_id)',
-      'CREATE INDEX idx_audit_logs_action ON audit_logs(action)',
-      'CREATE INDEX idx_audit_logs_created_at ON audit_logs(created_at)'
+      'CREATE INDEX IF NOT EXISTS idx_etymology_word_id ON etymology(word_id)',
+      'CREATE INDEX IF NOT EXISTS idx_etymology_created_by ON etymology(created_by)',
+
+      'CREATE INDEX IF NOT EXISTS idx_user_favorites_user ON user_favorites(user_id)',
+      'CREATE INDEX IF NOT EXISTS idx_user_favorites_word ON user_favorites(word_id)',
+
+      'CREATE INDEX IF NOT EXISTS idx_conversations_p1 ON conversations(participant1_id)',
+      'CREATE INDEX IF NOT EXISTS idx_conversations_p2 ON conversations(participant2_id)',
+
+      'CREATE INDEX IF NOT EXISTS idx_messages_conversation ON messages(conversation_id)',
+      'CREATE INDEX IF NOT EXISTS idx_messages_sender ON messages(sender_id)',
+
+      'CREATE INDEX IF NOT EXISTS idx_notifications_user ON notifications(user_id)',
+      'CREATE INDEX IF NOT EXISTS idx_notifications_read ON notifications(user_id, is_read)',
+
+      'CREATE INDEX IF NOT EXISTS idx_search_history_user_id ON search_history(user_id)',
+      'CREATE INDEX IF NOT EXISTS idx_search_history_created_at ON search_history(created_at)',
+
+      'CREATE INDEX IF NOT EXISTS idx_audit_logs_user_id ON audit_logs(user_id)',
+      'CREATE INDEX IF NOT EXISTS idx_audit_logs_action ON audit_logs(action)',
+      'CREATE INDEX IF NOT EXISTS idx_audit_logs_created_at ON audit_logs(created_at)'
     ];
 
     for (const indexQuery of indexes) {
       try {
         await client.query(indexQuery);
       } catch (error) {
-        // Index might already exist, continue
         logger.warn(`Index creation warning: ${error.message}`);
       }
     }
@@ -282,21 +675,17 @@ class DatabaseInitializer {
       $$ language 'plpgsql'
     `);
 
-    // Create triggers
-    const triggers = [
-      'CREATE TRIGGER update_users_updated_at BEFORE UPDATE ON users FOR EACH ROW EXECUTE FUNCTION update_updated_at_column()',
-      'CREATE TRIGGER update_words_updated_at BEFORE UPDATE ON words FOR EACH ROW EXECUTE FUNCTION update_updated_at_column()',
-      'CREATE TRIGGER update_etymology_updated_at BEFORE UPDATE ON etymology FOR EACH ROW EXECUTE FUNCTION update_updated_at_column()',
-      'CREATE TRIGGER update_discussions_updated_at BEFORE UPDATE ON discussions FOR EACH ROW EXECUTE FUNCTION update_updated_at_column()'
-    ];
-
-    for (const triggerQuery of triggers) {
-      try {
-        await client.query(triggerQuery);
-      } catch (error) {
-        // Trigger might already exist, continue
-        logger.warn(`Trigger creation warning: ${error.message}`);
-      }
+    // Create triggers (skip duplicates silently)
+    const triggerTables = ['users', 'discussions', 'answers', 'words', 'etymology'];
+    for (const tbl of triggerTables) {
+      await client.query(`
+        DO $$ BEGIN
+          CREATE TRIGGER update_${tbl}_updated_at
+            BEFORE UPDATE ON ${tbl}
+            FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+        EXCEPTION WHEN duplicate_object THEN NULL;
+        END $$
+      `).catch(e => logger.warn(`Trigger creation warning (${tbl}): ${e.message}`));
     }
   }
 }

@@ -204,6 +204,88 @@ if (process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET) {
 // ============================================
 
 /**
+ * @route   GET /api/auth/google/status
+ * @desc    Get Google account link status for current user
+ * @access  Private
+ */
+router.get('/google/status',
+  authenticate,
+  AuthController.getGoogleLinkStatus
+);
+
+if (process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET) {
+  /**
+   * @route   GET /api/auth/google/link
+   * @desc    Initiate Google OAuth to link account
+   * @access  Private (token passed as query param because browser redirect cannot send headers)
+   */
+  router.get('/google/link',
+    async (req, res, next) => {
+      const token = req.query.token;
+      if (!token) {
+        return res.status(401).json({ success: false, message: 'Access token required' });
+      }
+      try {
+        const jwt = require('jsonwebtoken');
+        const decoded = jwt.verify(token, process.env.JWT_SECRET);
+        const { db } = require('../config/database');
+        const result = await db.query(
+          'SELECT id, email, role, is_active, email_verified FROM users WHERE id = $1 AND deleted_at IS NULL',
+          [decoded.userId]
+        );
+        if (!result.rows[0] || !result.rows[0].is_active) {
+          return res.status(401).json({ success: false, message: 'Invalid token' });
+        }
+        req.user = result.rows[0];
+        next();
+      } catch {
+        return res.status(401).json({ success: false, message: 'Invalid or expired token' });
+      }
+    },
+    (req, res, next) => {
+      // Encode current user ID in state so callback knows who to link
+      const state = Buffer.from(`link:${req.user.id}`).toString('base64');
+      return passport.authenticate('google', {
+        scope: ['profile', 'email'],
+        state
+      })(req, res, next);
+    }
+  );
+
+  /**
+   * @route   GET /api/auth/google/link/callback
+   * @desc    Google OAuth callback for account linking
+   * @access  Public (verified via state param)
+   */
+  router.get('/google/link/callback',
+    (req, res, next) => {
+      if (req.query?.error) {
+        const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
+        return res.redirect(`${frontendUrl}/settings?google_link=error&message=${encodeURIComponent(req.query.error_description || 'Google OAuth error')}`);
+      }
+      next();
+    },
+    passport.authenticate('google', { session: false, failWithError: true }),
+    AuthController.googleLinkCallback,
+    (err, req, res, next) => {
+      const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
+      const msg = encodeURIComponent(err?.message || 'Google link failed. Please try again.');
+      res.redirect(`${frontendUrl}/settings?google_link=error&message=${msg}`);
+    }
+  );
+}
+
+/**
+ * @route   DELETE /api/auth/google/unlink
+ * @desc    Unlink Google account from current user
+ * @access  Private
+ */
+router.delete('/google/unlink',
+  authenticate,
+  AuthController.unlinkGoogleAccount
+);
+
+/**
  * @route   GET /api/auth/me
  * @desc    Get current user profile
  * @access  Private

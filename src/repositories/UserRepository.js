@@ -130,6 +130,51 @@ class UserRepository extends BaseRepository {
   }
 
   /**
+   * Find user by ID including google_id and oauth_provider fields
+   */
+  async findByIdWithOAuth(id) {
+    const query = `
+      SELECT ${this.safeColumns}, google_id, oauth_provider
+      FROM ${this.tableName}
+      WHERE id = $1 AND deleted_at IS NULL
+    `;
+    const result = await this.db.query(query, [id]);
+    return result.rows[0] || null;
+  }
+
+  /**
+   * Link a Google account to an existing user
+   */
+  async linkGoogleAccount(userId, googleId, oauthProvider = 'google') {
+    const query = `
+      UPDATE ${this.tableName}
+      SET google_id = $1, oauth_provider = $2, updated_at = NOW()
+      WHERE id = $3 AND deleted_at IS NULL
+      RETURNING ${this.safeColumns}, google_id, oauth_provider
+    `;
+    const result = await this.db.query(query, [googleId, oauthProvider, userId]);
+    if (!result.rows[0]) throw new Error('User not found');
+    delete result.rows[0].password_hash;
+    return result.rows[0];
+  }
+
+  /**
+   * Unlink Google account from a user (requires password_hash to exist)
+   */
+  async unlinkGoogleAccount(userId) {
+    const query = `
+      UPDATE ${this.tableName}
+      SET google_id = NULL, oauth_provider = NULL, updated_at = NOW()
+      WHERE id = $1 AND deleted_at IS NULL
+      RETURNING ${this.safeColumns}, google_id, oauth_provider
+    `;
+    const result = await this.db.query(query, [userId]);
+    if (!result.rows[0]) throw new Error('User not found');
+    delete result.rows[0].password_hash;
+    return result.rows[0];
+  }
+
+  /**
    * Create new user with hashed password
    */
   async create(userData) {

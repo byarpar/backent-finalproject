@@ -225,6 +225,72 @@ class AuthController {
 
     sendSuccess(res, HTTP_STATUS.OK, { user }, 'User retrieved successfully');
   });
+
+  /**
+   * Get Google link status for current user
+   * GET /api/auth/google/status
+   */
+  getGoogleLinkStatus = asyncHandler(async (req, res) => {
+    const status = await authService.getGoogleLinkStatus(req.user.id);
+    sendSuccess(res, HTTP_STATUS.OK, status, 'Google link status retrieved');
+  });
+
+  /**
+   * Google OAuth callback when linking an account.
+   * Passport populates req.user with the Google profile user object (not the existing user).
+   * The existing user's ID is carried in the OAuth state param.
+   */
+  googleLinkCallback = asyncHandler(async (req, res) => {
+    const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
+
+    // State param = base64("link:<userId>")
+    const rawState = req.query.state || '';
+    let linkUserId = null;
+    try {
+      const decoded = Buffer.from(rawState, 'base64').toString('utf8');
+      if (decoded.startsWith('link:')) linkUserId = decoded.slice(5);
+    } catch (_) { /* ignore */ }
+
+    if (!linkUserId) {
+      return res.redirect(`${frontendUrl}/settings?google_link=error&message=${encodeURIComponent('Invalid link request.')}`);
+    }
+
+    const googleProfile = req.user; // populated by passport from Google
+    if (!googleProfile || !googleProfile.id) {
+      return res.redirect(`${frontendUrl}/settings?google_link=error&message=${encodeURIComponent('Google authentication failed.')}`);
+    }
+
+    const UserRepository = require('../repositories/UserRepository');
+
+    // Check if this Google ID is already linked to a different account
+    const existing = await UserRepository.findByGoogleId(googleProfile.id);
+    if (existing && existing.id !== linkUserId) {
+      return res.redirect(`${frontendUrl}/settings?google_link=error&message=${encodeURIComponent('This Google account is already linked to another account.')}`);
+    }
+
+    await UserRepository.linkGoogleAccount(linkUserId, googleProfile.id, 'google');
+
+    // Auto-set Google profile photo if the user has none
+    const googlePhoto = googleProfile.photos?.[0]?.value || null;
+    if (googlePhoto) {
+      const existingUser = await UserRepository.findById(linkUserId);
+      if (existingUser && !existingUser.profile_photo_url) {
+        await UserRepository.update(linkUserId, { profile_photo_url: googlePhoto });
+      }
+    }
+
+    logger.info('Google account linked', { userId: linkUserId, googleId: googleProfile.id });
+    res.redirect(`${frontendUrl}/settings?google_link=success`);
+  });
+
+  /**
+   * Unlink Google account from current user
+   * DELETE /api/auth/google/unlink
+   */
+  unlinkGoogleAccount = asyncHandler(async (req, res) => {
+    const updated = await authService.unlinkGoogleAccount(req.user.id);
+    sendSuccess(res, HTTP_STATUS.OK, { user: updated }, 'Google account unlinked successfully');
+  });
 }
 
 module.exports = new AuthController();

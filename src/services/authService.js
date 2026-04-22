@@ -640,6 +640,49 @@ class AuthService {
     logger.info('User logged out');
     return true;
   }
+
+  /**
+   * Get Google OAuth link status for a user
+   */
+  async getGoogleLinkStatus(userId) {
+    const user = await UserRepository.findByIdWithOAuth(userId);
+    if (!user) throw new NotFoundError('User not found');
+
+    // Check if user has a password set (Google-only users do not)
+    const authUser = await UserRepository.findByEmail(user.email);
+    const hasPassword = !!(authUser && authUser.password);
+
+    return {
+      linked: !!user.google_id,
+      oauth_provider: user.oauth_provider || null,
+      has_password: hasPassword
+    };
+  }
+
+  /**
+   * Unlink Google account from user.
+   * Only allowed if user has a password set (so they can still log in).
+   */
+  async unlinkGoogleAccount(userId) {
+    const user = await UserRepository.findByIdWithOAuth(userId);
+    if (!user) throw new NotFoundError('User not found');
+
+    if (!user.google_id) {
+      throw new ValidationError('No Google account is linked to your account.');
+    }
+
+    // Fetch full auth record to check password_hash
+    const authUser = await UserRepository.findByEmail(user.email);
+    if (!authUser || !authUser.password) {
+      throw new ValidationError(
+        'You must set a password before unlinking Google. Otherwise you would not be able to log in.'
+      );
+    }
+
+    const updated = await UserRepository.unlinkGoogleAccount(userId);
+    logger.info('Google account unlinked', { userId });
+    return updated;
+  }
 }
 
 module.exports = new AuthService();
