@@ -7,7 +7,7 @@ const jwt = require('jsonwebtoken');
 const bcrypt = require('bcryptjs');
 const UserRepository = require('../repositories/UserRepository');
 const emailService = require('./emailService');
-const { env: config } = require('../config');
+const { env: config, features } = require('../config');
 const logger = require('../utils/logger');
 const { generateVerificationCode } = require('../utils/helpers');
 const {
@@ -114,7 +114,7 @@ class AuthService {
     });
 
     // Send verification email
-    if (config.features.emailVerification) {
+    if (features.emailVerification) {
       try {
         await this.sendVerificationEmail(email);
         logger.info('Verification email sent', { email, userId: user.id });
@@ -190,7 +190,7 @@ class AuthService {
     }
 
     // Check email verification
-    if (config.features.emailVerification && !user.email_verified) {
+    if (features.emailVerification && !user.email_verified) {
       throw new AuthenticationError('Please verify your email address', {
         requiresVerification: true,
         email: user.email
@@ -252,8 +252,7 @@ class AuthService {
       });
 
       logger.info('New user created via Google OAuth', {
-        userId: user.id,
-        email
+        userId: user.id,email
       });
     } else {
       // Update last login

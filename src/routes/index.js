@@ -17,19 +17,19 @@ const adminRoutes = require('./admin');
 // ROUTE REGISTRATION
 // =============================================================================
 
-// Auth routes - /api/auth
+// Auth routes - /lisudictionary.com/auth
 router.use('/auth', authRoutes);
 
-// User routes - /api/users
+// User routes - /lisudictionary.com/users
 router.use('/users', userRoutes);
 
-// Discussion routes - /api/discussions
+// Discussion routes - /lisudictionary.com/discussions
 router.use('/discussions', discussionRoutes);
 
-// Answer routes - /api/answers
+// Answer routes - /lisudictionary.com/answers
 router.use('/answers', answerRoutes);
 
-// Admin routes - /api/admin
+// Admin routes - /lisudictionary.com/admin
 router.use('/admin', adminRoutes);
 
 // =============================================================================
@@ -55,11 +55,11 @@ router.get('/', (req, res) => {
     message: 'DevForum API',
     version: '1.0.0',
     endpoints: {
-      auth: '/api/auth',
-      users: '/api/users',
-      discussions: '/api/discussions',
-      answers: '/api/answers',
-      admin: '/api/admin',
+      auth: '/lisudictionary.com/auth',
+      users: '/lisudictionary.com/users',
+      discussions: '/lisudictionary.com/discussions',
+      answers: '/lisudictionary.com/answers',
+      admin: '/lisudictionary.com/admin',
       health: '/api/health'
     }
   });

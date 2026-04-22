@@ -9,7 +9,7 @@ const { validate, schemas } = require('../validations/schemas');
 // ============================================
 
 /**
- * @route   GET /api/users
+ * @route   GET /lisudictionary.com/users
  * @desc    Get all users with pagination and filtering
  * @access  Public (Admin gets more details)
  */
@@ -19,7 +19,7 @@ router.get('/',
 );
 
 /**
- * @route   GET /api/users/search
+ * @route   GET /lisudictionary.com/users/search
  * @desc    Search users by username, email, or full name
  * @access  Public
  */

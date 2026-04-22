@@ -263,6 +263,14 @@ const corsOptions = {
 };
 
 // =============================================================================
+// FEATURE FLAGS
+// =============================================================================
+
+const features = {
+  emailVerification: process.env.FEATURE_EMAIL_VERIFICATION === 'true'
+};
+
+// =============================================================================
 // EXPORTS
 // =============================================================================
 
@@ -270,5 +278,6 @@ module.exports = {
   env,
   constants,
   dbConfig: dbConfig[env.NODE_ENV] || dbConfig.development,
-  corsOptions
+  corsOptions,
+  features
 };

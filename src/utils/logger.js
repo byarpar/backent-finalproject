@@ -170,7 +170,7 @@ const log = {
     const userId = req.user ? req.user.id : 'unauthenticated';
     const ip = req.ip || req.connection.remoteAddress;
 
-    logger.error('Authentication failed', {
+    logger.error(`LOGIN_FAILED IP=${ip}`, {
       method: req.method,
       url: req.originalUrl || req.url,
       userId,

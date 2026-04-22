@@ -98,6 +98,7 @@ app.get('/', (req, res) => {
       endpoints: {
         health: '/health',
         auth: '/api/auth',
+        users: '/api/users',
         discussions: '/api/discussions',
         answers: '/api/answers',
         admin: '/api/admin'

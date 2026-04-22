@@ -58,6 +58,12 @@ class DatabaseError extends AppError {
   }
 }
 
+class AuthenticationError extends AppError {
+  constructor(message = 'Authentication failed') {
+    super(message, 401, 'AUTHENTICATION_ERROR');
+  }
+}
+
 // =============================================================================
 // RESPONSE UTILITIES
 // =============================================================================
@@ -306,6 +312,7 @@ module.exports = {
   ForbiddenError,
   ConflictError,
   DatabaseError,
+  AuthenticationError,
 
   // Response utilities
   successResponse,
