@@ -2,6 +2,7 @@ require('dotenv').config();
 const http = require('http');
 const { app, initializeApp } = require('./app');
 const logger = require('./utils/logger');
+const { initPublicIp } = require('./utils/helpers');
 
 const PORT = process.env.PORT || 3001;
 const NODE_ENV = process.env.NODE_ENV || 'development';
@@ -13,6 +14,9 @@ const startServer = async () => {
 
     // Initialize the application (database connections, etc.)
     await initializeApp();
+
+    // Resolve and cache the server's public IP (for loopback fallback)
+    await initPublicIp();
 
     console.log('2. App initialized, creating HTTP server...');
 

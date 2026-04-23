@@ -348,6 +348,91 @@ const retry = async (fn, maxAttempts = 3, delay = 1000, backoffMultiplier = 2) =
   }
 };
 
+/**
+ * Cached public IP of the server (fetched once at startup).
+ * Used as fallback when the request comes from loopback (127.0.0.1).
+ */
+let _cachedPublicIp = null;
+
+/**
+ * Fetch and cache the server's public IP address.
+ * Call once during server startup.
+ */
+const initPublicIp = async () => {
+  const services = [
+    'https://api.ipify.org',
+    'https://ifconfig.me/ip',
+    'https://icanhazip.com'
+  ];
+
+  for (const url of services) {
+    try {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 3000);
+      const res = await fetch(url, { signal: controller.signal });
+      clearTimeout(timeout);
+      if (res.ok) {
+        _cachedPublicIp = (await res.text()).trim();
+        logger.info(`Public IP resolved: ${_cachedPublicIp}`);
+        return _cachedPublicIp;
+      }
+    } catch {
+      // try next service
+    }
+  }
+  logger.warn('Could not resolve public IP — loopback requests will remain 127.0.0.1');
+  return null;
+};
+
+/**
+ * Extract the real client IP address from a request.
+ * Handles:
+ *   - Cloudflare:        CF-Connecting-IP
+ *   - Nginx / CDN:       X-Real-IP
+ *   - Generic proxies:   X-Forwarded-For (first non-private entry)
+ *   - IPv4-mapped IPv6:  ::ffff:192.168.x.x  →  192.168.x.x
+ *   - IPv6 loopback:     ::1  →  127.0.0.1  →  public IP (if available)
+ *   - Fallback:          req.ip / socket.remoteAddress
+ */
+const getClientIp = (req) => {
+  // 1. Cloudflare passes the original visitor IP in this header
+  const cfIp = req.headers['cf-connecting-ip'];
+  if (cfIp) return normalizeIp(cfIp.trim());
+
+  // 2. Nginx commonly sets X-Real-IP to the real client IP
+  const realIp = req.headers['x-real-ip'];
+  if (realIp) return normalizeIp(realIp.trim());
+
+  // 3. X-Forwarded-For: "client, proxy1, proxy2" — take the leftmost (real client)
+  const forwarded = req.headers['x-forwarded-for'];
+  if (forwarded) {
+    const first = forwarded.split(',')[0].trim();
+    if (first) return normalizeIp(first);
+  }
+
+  // 4. Express req.ip (respects trust proxy setting)
+  const ip = normalizeIp(req.ip || req.socket?.remoteAddress || '0.0.0.0');
+
+  // 5. If loopback, substitute cached public IP
+  if (ip === '127.0.0.1' && _cachedPublicIp) {
+    return _cachedPublicIp;
+  }
+
+  return ip;
+};
+
+/**
+ * Normalize an IP string:
+ *   ::ffff:192.168.1.1  →  192.168.1.1   (IPv4-mapped IPv6)
+ *   ::1                 →  127.0.0.1     (IPv6 loopback)
+ */
+const normalizeIp = (ip) => {
+  if (!ip) return '0.0.0.0';
+  if (ip === '::1') return '127.0.0.1';
+  if (ip.startsWith('::ffff:')) return ip.slice(7);
+  return ip;
+};
+
 module.exports = {
 
 
@@ -387,5 +472,9 @@ module.exports = {
 
   // Formatting
   formatFileSize,
-  timeAgo
+  timeAgo,
+
+  // IP utilities
+  getClientIp,
+  initPublicIp
 };

@@ -6,7 +6,7 @@
 const authService = require('../services/authService');
 const userService = require('../services/userService');
 const { successResponse, errorResponse, sendCreated, sendSuccess, sendError } = require('../utils');
-const { asyncHandler } = require('../utils/helpers');
+const { asyncHandler, getClientIp } = require('../utils/helpers');
 const { constants: { STATUS_CODES: HTTP_STATUS } } = require('../config');
 const logger = require('../utils/logger');
 
@@ -25,7 +25,7 @@ class AuthController {
       full_name,
       role,
       recaptchaToken,
-      ipAddress: req.ip
+      ipAddress: getClientIp(req)
     });
 
     sendCreated(res, result, 'Registration successful');
@@ -38,7 +38,7 @@ class AuthController {
   login = asyncHandler(async (req, res) => {
     const { email, password, recaptchaToken } = req.body;
 
-    const result = await authService.login(email, password, recaptchaToken, req.ip);
+    const result = await authService.login(email, password, recaptchaToken, getClientIp(req));
 
     sendSuccess(res, HTTP_STATUS.OK, result, 'Login successful');
   });

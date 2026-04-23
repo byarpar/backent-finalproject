@@ -216,20 +216,6 @@ class DatabaseInitializer {
         )
       `);
 
-      // ── etymology ──────────────────────────────────────────────────────────
-      await client.query(`
-        CREATE TABLE IF NOT EXISTS etymology (
-          id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-          word_id INTEGER REFERENCES words(id) ON DELETE CASCADE,
-          origin_language VARCHAR(100),
-          origin_word VARCHAR(500),
-          description TEXT,
-          created_by UUID REFERENCES users(id) ON DELETE SET NULL,
-          created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-          updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
-        )
-      `);
-
       // ── missing indexes (idempotent) ────────────────────────────────────────
       const idxStatements = [
         `CREATE INDEX IF NOT EXISTS idx_answers_discussion ON answers(discussion_id)`,
@@ -251,7 +237,7 @@ class DatabaseInitializer {
       }
 
       // ── updated_at trigger on new tables ───────────────────────────────────
-      const triggerTables = ['answers', 'words', 'etymology'];
+      const triggerTables = ['answers', 'words'];
       for (const tbl of triggerTables) {
         await client.query(`
           DO $$ BEGIN
@@ -263,6 +249,37 @@ class DatabaseInitializer {
         `).catch(e => logger.warn(`Trigger migration warning (${tbl}): ${e.message}`));
       }
 
+      // ── login_attempts (brute-force / Fail2Ban persistence) ───────────────
+      await client.query(`
+        CREATE TABLE IF NOT EXISTS login_attempts (
+          ip_address         VARCHAR(45)  PRIMARY KEY,
+          attempt_count      INTEGER      NOT NULL DEFAULT 0,
+          first_fail_at      TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          banned_until       TIMESTAMP WITH TIME ZONE,
+          last_attempt_type  VARCHAR(20)  DEFAULT 'login' CHECK (last_attempt_type IN ('login','register')),
+          last_email         VARCHAR(255),
+          updated_at         TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )
+      `);
+      await client.query(`
+        CREATE INDEX IF NOT EXISTS idx_login_attempts_banned_until ON login_attempts(banned_until)
+      `);
+      // Add new columns to existing login_attempts tables (idempotent)
+      await client.query(`
+        ALTER TABLE login_attempts
+          ADD COLUMN IF NOT EXISTS last_attempt_type VARCHAR(20) DEFAULT 'login'
+            CHECK (last_attempt_type IN ('login','register'))
+      `).catch(() => { });
+      await client.query(`
+        ALTER TABLE login_attempts ADD COLUMN IF NOT EXISTS last_email VARCHAR(255)
+      `).catch(() => { });
+      // ── users: add IP tracking columns ────────────────────────────────────
+      await client.query(`
+        ALTER TABLE users ADD COLUMN IF NOT EXISTS last_login_ip VARCHAR(45)
+      `).catch(() => { });
+      await client.query(`
+        ALTER TABLE users ADD COLUMN IF NOT EXISTS registered_ip VARCHAR(45)
+      `).catch(() => { });
       await client.query('COMMIT');
       logger.info('Database migrations applied successfully');
     } catch (error) {
@@ -345,7 +362,6 @@ class DatabaseInitializer {
       // Drop all tables in dependency order
       await client.query(`
         DROP TABLE IF EXISTS user_favorites CASCADE;
-        DROP TABLE IF EXISTS etymology CASCADE;
         DROP TABLE IF EXISTS word_category_mappings CASCADE;
         DROP TABLE IF EXISTS word_categories CASCADE;
         DROP TABLE IF EXISTS words CASCADE;
@@ -383,6 +399,8 @@ class DatabaseInitializer {
           google_id VARCHAR(255) UNIQUE,
           oauth_provider VARCHAR(50),
           last_login TIMESTAMP WITH TIME ZONE,
+          last_login_ip VARCHAR(45),
+          registered_ip VARCHAR(45),
           profile_photo_url TEXT,
           deleted_at TIMESTAMP WITH TIME ZONE,
           created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
@@ -498,20 +516,6 @@ class DatabaseInitializer {
         )
       `);
 
-      // ── etymology ──────────────────────────────────────────────────────────
-      await client.query(`
-        CREATE TABLE etymology (
-          id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-          word_id INTEGER REFERENCES words(id) ON DELETE CASCADE,
-          origin_language VARCHAR(100),
-          origin_word VARCHAR(500),
-          description TEXT,
-          created_by UUID REFERENCES users(id) ON DELETE SET NULL,
-          created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-          updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
-        )
-      `);
-
       // ── user_favorites ─────────────────────────────────────────────────────
       await client.query(`
         CREATE TABLE user_favorites (
@@ -589,6 +593,21 @@ class DatabaseInitializer {
       await this.createIndexes(client);
       await this.createTriggers(client);
 
+      // ── login_attempts ─────────────────────────────────────────────────────
+      await client.query(`
+        CREATE TABLE IF NOT EXISTS login_attempts (
+          ip_address         VARCHAR(45)  PRIMARY KEY,
+          attempt_count      INTEGER      NOT NULL DEFAULT 0,
+          first_fail_at      TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          banned_until       TIMESTAMP WITH TIME ZONE,
+          last_attempt_type  VARCHAR(20)  DEFAULT 'login' CHECK (last_attempt_type IN ('login','register')),
+          last_email         VARCHAR(255),
+          updated_at         TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )
+      `);
+      await client.query(`
+        CREATE INDEX IF NOT EXISTS idx_login_attempts_banned_until ON login_attempts(banned_until)
+      `);
       await client.query('COMMIT');
 
     } catch (error) {
@@ -630,9 +649,6 @@ class DatabaseInitializer {
       'CREATE INDEX IF NOT EXISTS idx_word_categories_name ON word_categories(name)',
       'CREATE INDEX IF NOT EXISTS idx_word_category_mappings_word ON word_category_mappings(word_id)',
       'CREATE INDEX IF NOT EXISTS idx_word_category_mappings_category ON word_category_mappings(category_id)',
-
-      'CREATE INDEX IF NOT EXISTS idx_etymology_word_id ON etymology(word_id)',
-      'CREATE INDEX IF NOT EXISTS idx_etymology_created_by ON etymology(created_by)',
 
       'CREATE INDEX IF NOT EXISTS idx_user_favorites_user ON user_favorites(user_id)',
       'CREATE INDEX IF NOT EXISTS idx_user_favorites_word ON user_favorites(word_id)',
@@ -676,7 +692,7 @@ class DatabaseInitializer {
     `);
 
     // Create triggers (skip duplicates silently)
-    const triggerTables = ['users', 'discussions', 'answers', 'words', 'etymology'];
+    const triggerTables = ['users', 'discussions', 'answers', 'words'];
     for (const tbl of triggerTables) {
       await client.query(`
         DO $$ BEGIN

@@ -59,8 +59,14 @@ class DatabaseError extends AppError {
 }
 
 class AuthenticationError extends AppError {
-  constructor(message = 'Authentication failed') {
-    super(message, 401, 'AUTHENTICATION_ERROR');
+  constructor(message = 'Authentication failed', details = null) {
+    super(message, 401, 'AUTHENTICATION_ERROR', details);
+  }
+}
+
+class RateLimitError extends AppError {
+  constructor(message = 'Too many requests', details = null) {
+    super(message, 429, 'RATE_LIMIT_ERROR', details);
   }
 }
 
@@ -313,6 +319,7 @@ module.exports = {
   ConflictError,
   DatabaseError,
   AuthenticationError,
+  RateLimitError,
 
   // Response utilities
   successResponse,

@@ -187,7 +187,8 @@ class UserRepository extends BaseRepository {
       google_id = null,
       oauth_provider = null,
       profile_photo_url = null,
-      email_verified = false
+      email_verified = false,
+      registered_ip = null
     } = userData;
 
     // Check if user already exists
@@ -214,9 +215,10 @@ class UserRepository extends BaseRepository {
       const query = `
         INSERT INTO ${this.tableName} (
           id, email, password_hash, username, full_name, role,
-          google_id, oauth_provider, profile_photo_url, email_verified
+          google_id, oauth_provider, profile_photo_url, email_verified,
+          registered_ip
         )
-        VALUES (uuid_generate_v4(), $1, $2, $3, $4, $5, $6, $7, $8, $9)
+        VALUES (uuid_generate_v4(), $1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
         RETURNING ${this.safeColumns}
       `;
 
@@ -229,7 +231,8 @@ class UserRepository extends BaseRepository {
         google_id,
         oauth_provider,
         profile_photo_url,
-        email_verified
+        email_verified,
+        registered_ip
       ]);
 
       logger.info('User created successfully', {
@@ -313,15 +316,17 @@ class UserRepository extends BaseRepository {
   /**
    * Update last login timestamp
    */
-  async updateLastLogin(id) {
+  async updateLastLogin(id, ipAddress = null) {
     const query = `
       UPDATE ${this.tableName}
-      SET last_login = NOW()
+      SET last_login = NOW(),
+          last_login_ip = COALESCE($2, last_login_ip),
+          updated_at = NOW()
       WHERE id = $1
       RETURNING id
     `;
 
-    await this.db.query(query, [id]);
+    await this.db.query(query, [id, ipAddress]);
   }
 
   /**

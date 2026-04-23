@@ -8,20 +8,112 @@ const bcrypt = require('bcryptjs');
 const UserRepository = require('../repositories/UserRepository');
 const emailService = require('./emailService');
 const { env: config, features } = require('../config');
+const { db } = require('../config/database');
 const logger = require('../utils/logger');
 const { generateVerificationCode } = require('../utils/helpers');
 const {
   AuthenticationError,
   ValidationError,
   NotFoundError,
-  ConflictError
+  ConflictError,
+  RateLimitError
 } = require('../utils');
 
 // Constants
 const GRACE_PERIOD_DAYS = 30;
 const GRACE_PERIOD_MS = GRACE_PERIOD_DAYS * 24 * 60 * 60 * 1000;
 
+// =============================================================================
+// DB-BACKED LOGIN RATE LIMITER (mirrors Fail2Ban jail settings)
+// =============================================================================
+const MAX_ATTEMPTS = 5;               // matches Fail2Ban maxretry=5
+const FIND_TIME_SECS = 10 * 60;         // matches Fail2Ban findtime=600  (seconds)
+const BAN_DURATION_SECS = 60 * 60;       // matches Fail2Ban bantime=3600 (seconds)
+
 class AuthService {
+  // ---------------------------------------------------------------------------
+  // Rate limiter helpers — DB-backed, persists across server restarts
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Throws RateLimitError if the IP is currently banned.
+   * Automatically clears expired bans from the DB.
+   */
+  async _checkRateLimit(ipAddress) {
+    if (!ipAddress) return;
+    const { rows } = await db.query(
+      `SELECT banned_until FROM login_attempts WHERE ip_address = $1`,
+      [ipAddress]
+    );
+    if (!rows.length || !rows[0].banned_until) return;
+
+    const bannedUntil = new Date(rows[0].banned_until).getTime();
+    const now = Date.now();
+
+    if (now < bannedUntil) {
+      const retryAfter = Math.ceil((bannedUntil - now) / 1000);
+      const minutes = Math.ceil(retryAfter / 60);
+      throw new RateLimitError(
+        `Too many failed login attempts. Please try again in ${minutes} minute(s).`,
+        { retryAfter, bannedUntil }
+      );
+    }
+
+    // Ban expired — clean up
+    await db.query(`DELETE FROM login_attempts WHERE ip_address = $1`, [ipAddress]);
+  }
+
+  /**
+   * Records a failed attempt in the DB.
+   * Throws RateLimitError when MAX_ATTEMPTS is reached.
+   * Returns remaining attempts.
+   */
+  async _recordFailedAttempt(ipAddress, email = null, attemptType = 'login') {
+    if (!ipAddress) return null;
+
+    // Upsert: reset window if first_fail_at is older than FIND_TIME_SECS
+    const { rows } = await db.query(
+      `INSERT INTO login_attempts (ip_address, attempt_count, first_fail_at, last_attempt_type, last_email, updated_at)
+       VALUES ($1, 1, NOW(), $3, $4, NOW())
+       ON CONFLICT (ip_address) DO UPDATE SET
+         attempt_count = CASE
+           WHEN login_attempts.first_fail_at < NOW() - ($2 || ' seconds')::INTERVAL
+           THEN 1
+           ELSE login_attempts.attempt_count + 1
+         END,
+         first_fail_at = CASE
+           WHEN login_attempts.first_fail_at < NOW() - ($2 || ' seconds')::INTERVAL
+           THEN NOW()
+           ELSE login_attempts.first_fail_at
+         END,
+         last_attempt_type = $3,
+         last_email        = $4,
+         updated_at        = NOW()
+       RETURNING attempt_count`,
+      [ipAddress, FIND_TIME_SECS, attemptType, email]
+    );
+
+    const count = rows[0].attempt_count;
+    const remaining = MAX_ATTEMPTS - count;
+
+    if (remaining <= 0) {
+      await db.query(
+        `UPDATE login_attempts
+         SET banned_until = NOW() + ($1 || ' seconds')::INTERVAL, updated_at = NOW()
+         WHERE ip_address = $2`,
+        [BAN_DURATION_SECS, ipAddress]
+      );
+      const bannedUntil = Date.now() + BAN_DURATION_SECS * 1000;
+      logger.warn(`Rate limit reached | IP: ${ipAddress} | Blocking for ${BAN_DURATION_SECS}s`);
+      throw new RateLimitError(
+        'Too many failed login attempts. Your IP has been temporarily blocked for 1 hour.',
+        { retryAfter: BAN_DURATION_SECS, bannedUntil }
+      );
+    }
+
+    return remaining;
+  }
+
   /**
    * Public wrapper for reCAPTCHA verification.
    */
@@ -161,15 +253,21 @@ class AuthService {
       ipAddress
     } = userData;
 
+    // Check app-level rate limit before any DB work (same table as login)
+    await this._checkRateLimit(ipAddress);
+
     // Validate reCAPTCHA before any account creation logic
     await this._verifyRecaptchaToken(recaptchaToken, ipAddress);
 
     // Check if user already exists
     const existingUser = await UserRepository.findByEmail(email);
     if (existingUser) {
+      const attemptsRemaining = await this._recordFailedAttempt(ipAddress, email, 'register');
+      logger.warn(`Failed register attempt | IP: ${ipAddress} | Email: ${email} | Reason: email already exists`);
       throw new ConflictError('User with this email already exists', {
         field: 'email',
-        value: email
+        value: email,
+        attemptsRemaining
       });
     }
 
@@ -177,9 +275,12 @@ class AuthService {
     if (username) {
       const existingUsername = await UserRepository.findByUsername(username);
       if (existingUsername) {
+        const attemptsRemaining = await this._recordFailedAttempt(ipAddress, email, 'register');
+        logger.warn(`Failed register attempt | IP: ${ipAddress} | Email: ${email} | Reason: username taken`);
         throw new ConflictError('Username is already taken', {
           field: 'username',
-          value: username
+          value: username,
+          attemptsRemaining
         });
       }
     }
@@ -191,7 +292,8 @@ class AuthService {
       username,
       full_name,
       role,
-      email_verified: false
+      email_verified: false,
+      registered_ip: ipAddress
     });
 
     // Send verification email
@@ -212,6 +314,9 @@ class AuthService {
     // Generate tokens
     const { token, refreshToken } = this._generateAuthTokens(user);
 
+    // Clear any failed attempts for this IP on successful registration
+    if (ipAddress) await db.query(`DELETE FROM login_attempts WHERE ip_address = $1`, [ipAddress]);
+
     logger.info('User registered successfully', {
       userId: user.id,
       email: user.email,
@@ -229,6 +334,9 @@ class AuthService {
    * Login user with email and password
    */
   async login(email, password, recaptchaToken, ipAddress = null) {
+    // Check app-level rate limit before doing any DB work
+    await this._checkRateLimit(ipAddress);
+
     await this._verifyRecaptchaToken(recaptchaToken, ipAddress);
 
     // Find user (including deleted accounts)
@@ -242,21 +350,25 @@ class AuthService {
         this._checkDeletedAccount(deletedUser, email);
       }
 
-      // Account truly doesn't exist
+      // Account truly doesn't exist — record the failure
+      const attemptsRemaining = await this._recordFailedAttempt(ipAddress, email, 'login');
       logger.warn(`Failed login attempt | IP: ${ipAddress} | Email: ${email} | Reason: non-existent email`);
       throw new AuthenticationError('No account found with this email address', {
         accountNotFound: true,
-        email
+        email,
+        attemptsRemaining
       });
     }
 
     // Verify password
     const isPasswordValid = await bcrypt.compare(password, user.password);
     if (!isPasswordValid) {
+      const attemptsRemaining = await this._recordFailedAttempt(ipAddress, email, 'login');
       logger.warn(`Failed login attempt | IP: ${ipAddress} | Email: ${email} | Reason: incorrect password`);
       throw new AuthenticationError('Incorrect password. Please try again.', {
         incorrectPassword: true,
-        email
+        email,
+        attemptsRemaining
       });
     }
 
@@ -281,7 +393,8 @@ class AuthService {
     }
 
     // Update last login
-    await UserRepository.updateLastLogin(user.id);
+    await UserRepository.updateLastLogin(user.id, ipAddress);
+    if (ipAddress) await db.query(`DELETE FROM login_attempts WHERE ip_address = $1`, [ipAddress]);
 
     // Generate tokens
     const { token, refreshToken } = this._generateAuthTokens(user);
