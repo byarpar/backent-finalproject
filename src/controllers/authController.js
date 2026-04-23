@@ -41,10 +41,6 @@ class AuthController {
     const result = await authService.login(email, password, recaptchaToken, req.ip);
 
     sendSuccess(res, HTTP_STATUS.OK, result, 'Login successful');
-
-    logger.warn(`Failed login attempt | IP: ${ip} | Email: ${email}`);
-
-    throw error;
   });
 
   /**

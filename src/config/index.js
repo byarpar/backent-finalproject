@@ -262,19 +262,15 @@ const corsOptions = {
 // =============================================================================
 
 const features = {
-  emailVerification: process.env.FEATURE_EMAIL_VERIFICATION === 'true'
-};
-
-// =============================================================================
-// EXPORTS
-// =============================================================================
-
-const features = {
   emailVerification: process.env.ENABLE_EMAIL_VERIFICATION === 'true',
   googleAuth: process.env.ENABLE_GOOGLE_AUTH === 'true',
   chat: process.env.ENABLE_CHAT === 'true',
   discussions: process.env.ENABLE_DISCUSSIONS === 'true',
 };
+
+// =============================================================================
+// EXPORTS
+// =============================================================================
 
 module.exports = {
   env,
@@ -282,5 +278,4 @@ module.exports = {
   features,
   dbConfig: dbConfig[env.NODE_ENV] || dbConfig.development,
   corsOptions,
-  features
 };

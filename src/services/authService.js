@@ -243,7 +243,7 @@ class AuthService {
       }
 
       // Account truly doesn't exist
-      logger.warn('Login attempt with non-existent email', { email });
+      logger.warn(`Failed login attempt | IP: ${ipAddress} | Email: ${email} | Reason: non-existent email`);
       throw new AuthenticationError('No account found with this email address', {
         accountNotFound: true,
         email
@@ -253,7 +253,7 @@ class AuthService {
     // Verify password
     const isPasswordValid = await bcrypt.compare(password, user.password);
     if (!isPasswordValid) {
-      logger.warn('Login attempt with incorrect password', { email });
+      logger.warn(`Failed login attempt | IP: ${ipAddress} | Email: ${email} | Reason: incorrect password`);
       throw new AuthenticationError('Incorrect password. Please try again.', {
         incorrectPassword: true,
         email
@@ -335,7 +335,7 @@ class AuthService {
       });
 
       logger.info('New user created via Google OAuth', {
-        userId: user.id,email
+        userId: user.id, email
       });
     } else {
       // Update last login
