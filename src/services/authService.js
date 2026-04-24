@@ -96,6 +96,9 @@ class AuthService {
     const count = rows[0].attempt_count;
     const remaining = MAX_ATTEMPTS - count;
 
+    // Always log the failure BEFORE throwing — so Fail2Ban sees every attempt including the final one
+    logger.warn(`Failed ${attemptType} attempt | IP: ${ipAddress} | Email: ${email} | Reason: invalid credentials (attempt ${count}/${MAX_ATTEMPTS})`);
+
     if (remaining <= 0) {
       await db.query(
         `UPDATE login_attempts
@@ -104,7 +107,7 @@ class AuthService {
         [BAN_DURATION_SECS, ipAddress]
       );
       const bannedUntil = Date.now() + BAN_DURATION_SECS * 1000;
-      logger.warn(`Rate limit reached | IP: ${ipAddress} | Blocking for ${BAN_DURATION_SECS}s`);
+      logger.warn(`Rate limit reached | IP: ${ipAddress} | Banned for ${BAN_DURATION_SECS}s`);
       throw new RateLimitError(
         'Too many failed login attempts. Your IP has been temporarily blocked for 1 hour.',
         { retryAfter: BAN_DURATION_SECS, bannedUntil }
@@ -263,7 +266,6 @@ class AuthService {
     const existingUser = await UserRepository.findByEmail(email);
     if (existingUser) {
       const attemptsRemaining = await this._recordFailedAttempt(ipAddress, email, 'register');
-      logger.warn(`Failed register attempt | IP: ${ipAddress} | Email: ${email} | Reason: email already exists`);
       throw new ConflictError('User with this email already exists', {
         field: 'email',
         value: email,
@@ -276,7 +278,6 @@ class AuthService {
       const existingUsername = await UserRepository.findByUsername(username);
       if (existingUsername) {
         const attemptsRemaining = await this._recordFailedAttempt(ipAddress, email, 'register');
-        logger.warn(`Failed register attempt | IP: ${ipAddress} | Email: ${email} | Reason: username taken`);
         throw new ConflictError('Username is already taken', {
           field: 'username',
           value: username,
@@ -352,7 +353,6 @@ class AuthService {
 
       // Account truly doesn't exist — record the failure
       const attemptsRemaining = await this._recordFailedAttempt(ipAddress, email, 'login');
-      logger.warn(`Failed login attempt | IP: ${ipAddress} | Email: ${email} | Reason: non-existent email`);
       throw new AuthenticationError('No account found with this email address', {
         accountNotFound: true,
         email,
@@ -364,7 +364,6 @@ class AuthService {
     const isPasswordValid = await bcrypt.compare(password, user.password);
     if (!isPasswordValid) {
       const attemptsRemaining = await this._recordFailedAttempt(ipAddress, email, 'login');
-      logger.warn(`Failed login attempt | IP: ${ipAddress} | Email: ${email} | Reason: incorrect password`);
       throw new AuthenticationError('Incorrect password. Please try again.', {
         incorrectPassword: true,
         email,
