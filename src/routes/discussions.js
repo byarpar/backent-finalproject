@@ -76,6 +76,16 @@ router.get('/user/saved',
 );
 
 /**
+ * @route   GET /api/discussions/user/reshared
+ * @desc    Get reshared discussions for current user
+ * @access  Private
+ */
+router.get('/user/reshared',
+  authenticate,
+  DiscussionController.getResharedDiscussions
+);
+
+/**
  * @route   GET /api/discussions/:id/related
  * @desc    Get related discussions by ID
  * @access  Public (with optional auth)
@@ -225,6 +235,28 @@ router.delete('/:id/save',
   authenticate,
   validate(schemas.common.params.id, 'params'),
   DiscussionController.unsaveDiscussion
+);
+
+/**
+ * @route   POST /api/discussions/:id/reshare
+ * @desc    Reshare discussion to profile
+ * @access  Private
+ */
+router.post('/:id/reshare',
+  authenticate,
+  validate(schemas.common.params.id, 'params'),
+  DiscussionController.reshareDiscussion
+);
+
+/**
+ * @route   DELETE /api/discussions/:id/reshare
+ * @desc    Remove reshare
+ * @access  Private
+ */
+router.delete('/:id/reshare',
+  authenticate,
+  validate(schemas.common.params.id, 'params'),
+  DiscussionController.unreshareDiscussion
 );
 
 /**

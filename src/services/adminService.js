@@ -388,6 +388,155 @@ class AdminService {
       },
     };
   }
+
+  /**
+   * Get role permissions overview with user counts
+   */
+  async getPermissions() {
+    const roleCounts = await db.query(
+      `SELECT role, COUNT(*)::int as count FROM users WHERE deleted_at IS NULL GROUP BY role ORDER BY role`
+    );
+
+    const roleCountMap = {};
+    roleCounts.rows.forEach(r => { roleCountMap[r.role] = r.count; });
+
+    // Permission definitions verified against actual route middleware + service-level checks
+    const discussionActions = [
+      'View discussions (public)',
+      'Create discussions',
+      'Edit own discussions',
+      'Delete own discussions',
+      'Vote on discussions',
+      'Save/bookmark discussions',
+      'Report discussions',
+      'Mark own as solved',
+      'Pin/unpin discussions',
+      'Lock/unlock discussions',
+      'Edit any discussion',
+      'Delete any discussion',
+    ];
+
+    const answerActions = [
+      'View answers (public)',
+      'Create answers',
+      'Edit own answers',
+      'Delete own answers',
+      'Vote on answers',
+      'Edit any answer',
+      'Delete any answer',
+    ];
+
+    const messagingActions = [
+      'Send direct messages',
+      'View own conversations',
+      'Delete own messages',
+    ];
+
+    const notificationActions = [
+      'View own notifications',
+      'Mark notifications as read',
+      'Delete own notifications',
+    ];
+
+    const profileActions = [
+      'Edit own profile',
+      'Follow/unfollow users',
+      'Change password',
+      'Delete own account',
+    ];
+
+    const adminActions = [
+      'Access admin dashboard',
+      'View/manage all users',
+      'Change user roles',
+      'Activate/deactivate users',
+      'Delete users',
+      'View reports',
+      'Resolve/dismiss reports',
+      'View moderation history',
+      'View analytics',
+      'View system info',
+    ];
+
+    // user: level 1 — standard permissions
+    const userDiscussion = [true, true, true, true, true, true, true, true, false, false, false, false];
+    const userAnswer = [true, true, true, true, true, false, false];
+    const userMessaging = [true, true, true];
+    const userNotif = [true, true, true];
+    const userProfile = [true, true, true, true];
+    const userAdmin = [false, false, false, false, false, false, false, false, false, false];
+
+    // moderator: level 2 — inherits user + moderate content
+    const modDiscussion = [true, true, true, true, true, true, true, true, true, true, true, true];
+    const modAnswer = [true, true, true, true, true, true, true];
+    const modMessaging = [true, true, true];
+    const modNotif = [true, true, true];
+    const modProfile = [true, true, true, true];
+    const modAdmin = [false, false, false, false, false, false, false, false, false, false];
+
+    // admin: level 3 — full access
+    const adminDiscussion = [true, true, true, true, true, true, true, true, true, true, true, true];
+    const adminAnswer = [true, true, true, true, true, true, true];
+    const adminMessaging = [true, true, true];
+    const adminNotif = [true, true, true];
+    const adminProfile = [true, true, true, true];
+    const adminAdmin = [true, true, true, true, true, true, true, true, true, true];
+
+    const buildCategory = (label, actions, flags) => ({
+      label,
+      actions: actions.map((name, i) => ({ name, allowed: flags[i] }))
+    });
+
+    const roles = [
+      {
+        id: 'user',
+        name: 'User',
+        level: 1,
+        count: roleCountMap['user'] || 0,
+        description: 'Standard community member with basic access',
+        permissions: {
+          discussions: buildCategory('Discussions', discussionActions, userDiscussion),
+          answers: buildCategory('Answers', answerActions, userAnswer),
+          messaging: buildCategory('Messaging', messagingActions, userMessaging),
+          notifications: buildCategory('Notifications', notificationActions, userNotif),
+          profile: buildCategory('Profile & Account', profileActions, userProfile),
+          admin: buildCategory('Administration', adminActions, userAdmin),
+        }
+      },
+      {
+        id: 'moderator',
+        name: 'Moderator',
+        level: 2,
+        count: roleCountMap['moderator'] || 0,
+        description: 'Content moderator with discussion and answer curation powers',
+        permissions: {
+          discussions: buildCategory('Discussions', discussionActions, modDiscussion),
+          answers: buildCategory('Answers', answerActions, modAnswer),
+          messaging: buildCategory('Messaging', messagingActions, modMessaging),
+          notifications: buildCategory('Notifications', notificationActions, modNotif),
+          profile: buildCategory('Profile & Account', profileActions, modProfile),
+          admin: buildCategory('Administration', adminActions, modAdmin),
+        }
+      },
+      {
+        id: 'admin',
+        name: 'Admin',
+        level: 3,
+        count: roleCountMap['admin'] || 0,
+        description: 'Full administrator with complete system access',
+        permissions: {
+          discussions: buildCategory('Discussions', discussionActions, adminDiscussion),
+          answers: buildCategory('Answers', answerActions, adminAnswer),
+          messaging: buildCategory('Messaging', messagingActions, adminMessaging),
+          notifications: buildCategory('Notifications', notificationActions, adminNotif),
+          profile: buildCategory('Profile & Account', profileActions, adminProfile),
+          admin: buildCategory('Administration', adminActions, adminAdmin),
+        }
+      }
+    ];
+
+    return { roles };
+  }
 }
 
 module.exports = new AdminService();

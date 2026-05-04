@@ -136,6 +136,47 @@ const sendMessage = asyncHandler(async (req, res) => {
 });
 
 /**
+ * Delete a conversation and its messages
+ */
+const deleteConversation = asyncHandler(async (req, res) => {
+  const userId = req.user.id;
+  const { conversationId } = req.params;
+
+  // Verify user is a participant
+  const conv = await db.query(
+    `SELECT id FROM conversations WHERE id = $1 AND (participant1_id = $2 OR participant2_id = $2)`,
+    [conversationId, userId]
+  );
+
+  if (!conv.rows[0]) return errorResponse(res, asError('Conversation not found'), 404);
+
+  await db.query(`DELETE FROM messages WHERE conversation_id = $1`, [conversationId]);
+  await db.query(`DELETE FROM conversations WHERE id = $1`, [conversationId]);
+
+  return successResponse(res, null, 'Conversation deleted');
+});
+
+/**
+ * Delete all conversations for current user
+ */
+const deleteAllConversations = asyncHandler(async (req, res) => {
+  const userId = req.user.id;
+
+  const convs = await db.query(
+    `SELECT id FROM conversations WHERE participant1_id = $1 OR participant2_id = $1`,
+    [userId]
+  );
+
+  const ids = convs.rows.map(c => c.id);
+  if (ids.length > 0) {
+    await db.query(`DELETE FROM messages WHERE conversation_id = ANY($1)`, [ids]);
+    await db.query(`DELETE FROM conversations WHERE id = ANY($1)`, [ids]);
+  }
+
+  return successResponse(res, null, 'All conversations deleted');
+});
+
+/**
  * Delete a message
  */
 const deleteMessage = asyncHandler(async (req, res) => {
@@ -156,5 +197,7 @@ module.exports = {
   getOrCreateConversation,
   getMessages,
   sendMessage,
+  deleteConversation,
+  deleteAllConversations,
   deleteMessage
 };

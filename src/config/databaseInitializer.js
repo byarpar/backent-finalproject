@@ -133,6 +133,16 @@ class DatabaseInitializer {
         )
       `);
 
+      // ── discussion_reshares ────────────────────────────────────────────────
+      await client.query(`
+        CREATE TABLE IF NOT EXISTS discussion_reshares (
+          discussion_id UUID REFERENCES discussions(id) ON DELETE CASCADE,
+          user_id UUID REFERENCES users(id) ON DELETE CASCADE,
+          created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+          PRIMARY KEY (discussion_id, user_id)
+        )
+      `);
+
       // ── conversations ──────────────────────────────────────────────────────
       await client.query(`
         CREATE TABLE IF NOT EXISTS conversations (

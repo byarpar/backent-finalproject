@@ -24,6 +24,7 @@ class DiscussionRepository extends BaseRepository {
       d.downvotes,
       d.answers_count,
       d.views_count,
+      COALESCE(d.reshare_count, 0) as reshare_count,
       d.is_solved,
       d.is_pinned,
       d.is_locked,
@@ -58,11 +59,13 @@ class DiscussionRepository extends BaseRepository {
         SELECT 
           ${this.columns},
           dv.vote_type as user_vote,
-          CASE WHEN sd.discussion_id IS NOT NULL THEN true ELSE false END as is_saved
+          CASE WHEN sd.discussion_id IS NOT NULL THEN true ELSE false END as is_saved,
+          CASE WHEN dr.discussion_id IS NOT NULL THEN true ELSE false END as is_reshared
         FROM ${this.tableName} d
         LEFT JOIN users u ON d.author_id = u.id
         LEFT JOIN discussion_votes dv ON d.id = dv.discussion_id AND dv.user_id = $1
         LEFT JOIN saved_discussions sd ON d.id = sd.discussion_id AND sd.user_id = $1
+        LEFT JOIN discussion_reshares dr ON d.id = dr.discussion_id AND dr.user_id = $1
       `;
 
       // Build WHERE conditions
@@ -550,6 +553,104 @@ class DiscussionRepository extends BaseRepository {
   }
 
   /**
+   * Reshare operations
+   */
+
+  async reshareDiscussion(discussionId, userId) {
+    try {
+      const existing = await this.db.query(
+        'SELECT discussion_id FROM discussion_reshares WHERE discussion_id = $1 AND user_id = $2',
+        [discussionId, userId]
+      );
+
+      if (existing.rows.length > 0) {
+        return false;
+      }
+
+      await this.db.query(
+        'INSERT INTO discussion_reshares (discussion_id, user_id) VALUES ($1, $2)',
+        [discussionId, userId]
+      );
+
+      // Increment reshare count
+      await this.db.query(
+        'UPDATE discussions SET reshare_count = COALESCE(reshare_count, 0) + 1 WHERE id = $1',
+        [discussionId]
+      );
+
+      return true;
+    } catch (error) {
+      logger.error('Error resharing discussion', { discussionId, userId, error: error.message });
+      throw error;
+    }
+  }
+
+  async unreshareDiscussion(discussionId, userId) {
+    try {
+      const result = await this.db.query(
+        'DELETE FROM discussion_reshares WHERE discussion_id = $1 AND user_id = $2',
+        [discussionId, userId]
+      );
+
+      if (result.rowCount === 0) {
+        return false;
+      }
+
+      await this.db.query(
+        'UPDATE discussions SET reshare_count = GREATEST(COALESCE(reshare_count, 0) - 1, 0) WHERE id = $1',
+        [discussionId]
+      );
+
+      return true;
+    } catch (error) {
+      logger.error('Error unresharing discussion', { discussionId, userId, error: error.message });
+      throw error;
+    }
+  }
+
+  async getResharedDiscussions(userId, page = 1, limit = 10) {
+    try {
+      const offset = (parseInt(page) - 1) * parseInt(limit);
+
+      const query = `
+        SELECT 
+          ${this.columns},
+          dr.created_at as reshared_at,
+          true as is_reshared
+        FROM ${this.tableName} d
+        LEFT JOIN users u ON d.author_id = u.id
+        INNER JOIN discussion_reshares dr ON d.id = dr.discussion_id
+        WHERE dr.user_id = $1
+        ORDER BY dr.created_at DESC
+        LIMIT $2 OFFSET $3
+      `;
+
+      const result = await this.db.query(query, [userId, parseInt(limit), offset]);
+
+      const countResult = await this.db.query(
+        'SELECT COUNT(*) FROM discussion_reshares WHERE user_id = $1',
+        [userId]
+      );
+      const total = parseInt(countResult.rows[0].count);
+
+      return {
+        data: result.rows,
+        pagination: {
+          page: parseInt(page),
+          limit: parseInt(limit),
+          total,
+          totalPages: Math.ceil(total / parseInt(limit)),
+          hasNext: parseInt(page) < Math.ceil(total / parseInt(limit)),
+          hasPrev: parseInt(page) > 1
+        }
+      };
+    } catch (error) {
+      logger.error('Error getting reshared discussions', { userId, error: error.message });
+      throw error;
+    }
+  }
+
+  /**
    * Save/bookmark operations
    */
 
@@ -821,7 +922,13 @@ class DiscussionRepository extends BaseRepository {
     // Filter conditions
     if (filter && filter !== 'all') {
       switch (filter) {
+        case 'answered':
+          whereConditions.push('d.is_solved = true');
+          break;
         case 'unanswered':
+          whereConditions.push('d.is_solved = false');
+          break;
+        case 'no-answer':
           whereConditions.push('d.answers_count = 0');
           break;
         case 'solved':
@@ -850,8 +957,8 @@ class DiscussionRepository extends BaseRepository {
     switch (sortBy) {
       case 'latest':
       case 'recent':
-        // Sort by most recently active (replies, edits, votes update the updated_at)
-        return ' ORDER BY d.updated_at DESC, d.created_at DESC';
+        // Reshared posts float to top by reshare time, then by most recently active
+        return ' ORDER BY GREATEST(COALESCE(dr.created_at, d.updated_at), d.updated_at) DESC, d.created_at DESC';
       case 'popular':
         // Sort by engagement score (votes + replies weighted)
         return ' ORDER BY (d.vote_count + (d.answers_count * 2)) DESC, d.created_at DESC';
@@ -859,10 +966,11 @@ class DiscussionRepository extends BaseRepository {
         // Sort by view count (most viewed discussions)
         return ' ORDER BY d.views_count DESC, d.created_at DESC';
       case 'newest':
-        // Sort by creation date (brand new discussions)
-        return ' ORDER BY d.created_at DESC';
+        // Reshared posts float to top by reshare time, then by creation date
+        return ' ORDER BY GREATEST(COALESCE(dr.created_at, d.created_at), d.created_at) DESC';
       default:
-        return ' ORDER BY d.updated_at DESC, d.created_at DESC';
+        // Reshared posts float to top by reshare time
+        return ' ORDER BY GREATEST(COALESCE(dr.created_at, d.updated_at), d.updated_at) DESC, d.created_at DESC';
     }
   }
 

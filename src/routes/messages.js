@@ -1,6 +1,6 @@
 const express = require('express');
 const router = express.Router();
-const { getConversations, getOrCreateConversation, getMessages, sendMessage, deleteMessage } = require('../controllers/messageController');
+const { getConversations, getOrCreateConversation, getMessages, sendMessage, deleteConversation, deleteAllConversations, deleteMessage } = require('../controllers/messageController');
 const { authenticate } = require('../middlewares');
 
 // All routes require authentication
@@ -17,6 +17,12 @@ router.get('/:conversationId', getMessages);
 
 // POST /api/messages/:conversationId
 router.post('/:conversationId', sendMessage);
+
+// DELETE /api/messages/conversations - Delete all conversations
+router.delete('/conversations', deleteAllConversations);
+
+// DELETE /api/messages/conversations/:conversationId - Delete single conversation
+router.delete('/conversations/:conversationId', deleteConversation);
 
 // DELETE /api/messages/message/:messageId
 router.delete('/message/:messageId', deleteMessage);

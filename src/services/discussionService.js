@@ -468,6 +468,56 @@ class DiscussionService {
   }
 
   /**
+   * Reshare discussion
+   */
+  async reshareDiscussion(discussionId, userId) {
+    try {
+      await DiscussionRepository.findByIdWithContext(discussionId);
+      const reshared = await DiscussionRepository.reshareDiscussion(discussionId, userId);
+      if (!reshared) {
+        throw new ValidationError('Discussion already reshared');
+      }
+      logger.info('Discussion reshared', { discussionId, userId });
+      return true;
+    } catch (error) {
+      logger.error('Error in reshareDiscussion service', { discussionId, error: error.message });
+      throw error;
+    }
+  }
+
+  /**
+   * Unreshare discussion
+   */
+  async unreshareDiscussion(discussionId, userId) {
+    try {
+      const unreshared = await DiscussionRepository.unreshareDiscussion(discussionId, userId);
+      if (!unreshared) {
+        throw new ValidationError('Discussion was not reshared');
+      }
+      logger.info('Discussion unreshared', { discussionId, userId });
+      return true;
+    } catch (error) {
+      logger.error('Error in unreshareDiscussion service', { discussionId, error: error.message });
+      throw error;
+    }
+  }
+
+  /**
+   * Get reshared discussions
+   */
+  async getResharedDiscussions(userId, page = 1, limit = 10) {
+    try {
+      const result = await DiscussionRepository.getResharedDiscussions(userId, page, limit);
+      const categoryMetadata = this.getCategoryMetadata();
+      result.data = result.data.map(d => this._enrichDiscussion(d, categoryMetadata));
+      return result;
+    } catch (error) {
+      logger.error('Error in getResharedDiscussions service', { error: error.message });
+      throw error;
+    }
+  }
+
+  /**
    * Save discussion (bookmark)
    */
   async saveDiscussion(discussionId, userId) {

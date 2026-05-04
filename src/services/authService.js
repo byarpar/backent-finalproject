@@ -361,6 +361,13 @@ class AuthService {
     }
 
     // Verify password
+    if (!user.password) {
+      // User registered via OAuth and has no password set
+      throw new AuthenticationError('This account uses Google sign-in. Please log in with Google.', {
+        oauthOnly: true,
+        email
+      });
+    }
     const isPasswordValid = await bcrypt.compare(password, user.password);
     if (!isPasswordValid) {
       const attemptsRemaining = await this._recordFailedAttempt(ipAddress, email, 'login');

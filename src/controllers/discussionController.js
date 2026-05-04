@@ -301,6 +301,42 @@ const unlockDiscussion = asyncHandler(async (req, res) => {
 });
 
 /**
+ * @desc    Reshare discussion
+ * @route   POST /api/discussions/:id/reshare
+ * @access  Private
+ */
+const reshareDiscussion = asyncHandler(async (req, res) => {
+  const { id } = req.params;
+  const userId = req.user.id;
+  await discussionService.reshareDiscussion(id, userId);
+  sendSuccess(res, HTTP_STATUS.OK, null, 'Discussion reshared');
+});
+
+/**
+ * @desc    Unreshare discussion
+ * @route   DELETE /api/discussions/:id/reshare
+ * @access  Private
+ */
+const unreshareDiscussion = asyncHandler(async (req, res) => {
+  const { id } = req.params;
+  const userId = req.user.id;
+  await discussionService.unreshareDiscussion(id, userId);
+  sendSuccess(res, HTTP_STATUS.OK, null, 'Discussion unreshared');
+});
+
+/**
+ * @desc    Get reshared discussions for current user
+ * @route   GET /api/discussions/user/reshared
+ * @access  Private
+ */
+const getResharedDiscussions = asyncHandler(async (req, res) => {
+  const userId = req.user.id;
+  const { page = 1, limit = 10 } = req.query;
+  const result = await discussionService.getResharedDiscussions(userId, parseInt(page), parseInt(limit));
+  sendSuccess(res, HTTP_STATUS.OK, { discussions: result.data }, 'Reshared discussions retrieved', { pagination: result.pagination });
+});
+
+/**
  * @desc    Save discussion (bookmark)
  * @route   POST /api/discussions/:id/save
  * @access  Private
@@ -401,6 +437,9 @@ module.exports = {
   unpinDiscussion,
   lockDiscussion,
   unlockDiscussion,
+  reshareDiscussion,
+  unreshareDiscussion,
+  getResharedDiscussions,
   saveDiscussion,
   unsaveDiscussion,
   getSavedDiscussions,

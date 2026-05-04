@@ -61,10 +61,10 @@ const commonSchemas = {
     .trim()
     .max(255)
     .messages({
-      'string.email': 'Invalid email format',
-      'string.empty': 'Email required',
-      'string.max': 'Email too long (max 255 characters)',
-      'any.required': 'Email required'
+      'string.email': 'Please enter a valid email',
+      'string.empty': 'Please enter your email',
+      'string.max': 'Email is too long',
+      'any.required': 'Please enter your email'
     }),
 
   password: Joi.string()
@@ -72,11 +72,11 @@ const commonSchemas = {
     .max(CONTENT_LIMITS.PASSWORD_MAX)
     .pattern(/^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&\-_#])/)
     .messages({
-      'string.min': 'Minimum {#limit} characters',
-      'string.max': 'Maximum {#limit} characters',
-      'string.empty': 'Password required',
-      'string.pattern.base': 'Must include uppercase, lowercase, number, and special character (@$!%*?&-_#)',
-      'any.required': 'Password required'
+      'string.min': 'Password must be at least {#limit} characters',
+      'string.max': 'Password is too long',
+      'string.empty': 'Please enter your password',
+      'string.pattern.base': 'Add uppercase, lowercase, number & special character',
+      'any.required': 'Please enter your password'
     }),
 
   username: Joi.string()
@@ -85,10 +85,10 @@ const commonSchemas = {
     .max(30)
     .trim()
     .messages({
-      'string.alphanum': 'Only letters and numbers allowed',
-      'string.min': 'Minimum 3 characters',
-      'string.max': 'Maximum 30 characters',
-      'string.empty': 'Username cannot be empty'
+      'string.alphanum': 'Letters and numbers only',
+      'string.min': 'Must be at least 3 characters',
+      'string.max': 'Must be 30 characters or less',
+      'string.empty': 'Please enter a username'
     }),
 
   pagination: Joi.object({
@@ -146,10 +146,10 @@ const authSchemas = {
     username: commonSchemas.username.allow('').optional(),
     full_name: Joi.string().min(2).max(100).trim().required()
       .messages({
-        'string.min': 'Minimum 2 characters',
-        'string.max': 'Maximum 100 characters',
-        'string.empty': 'Full name required',
-        'any.required': 'Full name required'
+        'string.min': 'Name must be at least 2 characters',
+        'string.max': 'Name is too long',
+        'string.empty': 'Please enter your name',
+        'any.required': 'Please enter your name'
       }),
     role: Joi.string().valid(...Object.values(USER_ROLES)).default(USER_ROLES.USER)
   }),
@@ -159,23 +159,23 @@ const authSchemas = {
     recaptchaToken: recaptchaField,
     password: Joi.string().required()
       .messages({
-        'any.required': 'Password required',
-        'string.empty': 'Password required'
+        'any.required': 'Please enter your password',
+        'string.empty': 'Please enter your password'
       })
   }),
 
   changePassword: Joi.object({
     currentPassword: Joi.string().required()
       .messages({
-        'any.required': 'Current password required',
-        'string.empty': 'Current password required'
+        'any.required': 'Please enter current password',
+        'string.empty': 'Please enter current password'
       }),
     newPassword: commonSchemas.password.required(),
     confirmPassword: Joi.string().valid(Joi.ref('newPassword')).required()
       .messages({
         'any.only': 'Passwords don\'t match',
-        'any.required': 'Confirm password required',
-        'string.empty': 'Confirm password required'
+        'any.required': 'Please confirm your password',
+        'string.empty': 'Please confirm your password'
       })
   }),
 
@@ -406,7 +406,8 @@ const discussionSchemas = {
     author_id: commonSchemas.id,
     search: Joi.string().max(100),
     sort: Joi.string().valid('latest', 'recent', 'popular', 'views', 'newest').default('latest'),
-    sortBy: Joi.string().valid('latest', 'recent', 'popular', 'views', 'newest').default('latest')
+    sortBy: Joi.string().valid('latest', 'recent', 'popular', 'views', 'newest').default('latest'),
+    filter: Joi.string().valid('all', 'answered', 'unanswered', 'no-answer', 'solved', 'my')
   }),
 
   vote: Joi.object({

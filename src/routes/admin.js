@@ -186,4 +186,15 @@ router.get('/analytics',
   AdminController.getAnalytics
 );
 
+/**
+ * @route   GET /api/admin/permissions
+ * @desc    Get role permissions overview
+ * @access  Admin
+ */
+router.get('/permissions',
+  authenticate,
+  authorize('admin'),
+  AdminController.getPermissions
+);
+
 module.exports = router;

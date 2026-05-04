@@ -352,6 +352,16 @@ const getAnalytics = asyncHandler(async (req, res) => {
   sendSuccess(res, HTTP_STATUS.OK, data, 'Analytics retrieved successfully');
 });
 
+/**
+ * @desc    Get role permissions overview
+ * @route   GET /api/admin/permissions
+ * @access  Admin
+ */
+const getPermissions = asyncHandler(async (req, res) => {
+  const data = await adminService.getPermissions();
+  sendSuccess(res, HTTP_STATUS.OK, data, 'Permissions retrieved successfully');
+});
+
 module.exports = {
   getDashboardStats,
   getAllUsers,
@@ -367,5 +377,6 @@ module.exports = {
   getCategoriesAndTags,
   getDiscussionStats,
   getUser,
-  getSystemInfo
+  getSystemInfo,
+  getPermissions
 };
